@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>タスクPainter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        
+        /* スティッキーヘッダー */
+        .sticky-header { position: sticky; top: 0; z-index: 30; }
+        .sticky-col { position: sticky; left: 0; z-index: 20; }
+        .sticky-corner { position: sticky; top: 0; left: 0; z-index: 40; }
+
+        /* アニメーション */
+        .pop-in { animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        /* 削除モード時のプルプルアニメーション */
+        @keyframes shake {
+            0% { transform: rotate(0deg); }
+            25% { transform: rotate(1deg); }
+            50% { transform: rotate(0deg); }
+            75% { transform: rotate(-1deg); }
+            100% { transform: rotate(0deg); }
+        }
+        .shake-anim { animation: shake 0.2s infinite; }
+
+        /* パレット選択時の強調 */
+        .palette-item.selected { 
+            transform: scale(1.02); 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border-width: 2px;
+            border-color: #4f46e5; /* indigo-600 */
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans h-screen flex flex-col overflow-hidden select-none">
+
+    <!-- Header -->
+    <header class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-2 shadow-md z-50 flex-shrink-0 flex justify-between items-center">
+        <div class="flex items-center gap-2">
+            <div class="bg-white/20 p-1.5 rounded-lg border border-white/30">
+                <i data-lucide="paintbrush" class="w-5 h-5 text-white"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold leading-none tracking-wide">タスクPainter</h1>
+                <div class="text-[10px] opacity-90 font-mono tracking-wider">Paint Your Schedule</div>
+            </div>
+        </div>
+        <div class="flex gap-2 text-[10px] md:text-xs bg-black/20 px-3 py-1 rounded-full items-center backdrop-blur-sm border border-white/10">
+            <i data-lucide="mouse-pointer-click" class="w-3 h-3"></i>
+            <span>Tap to Paint</span>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 flex flex-col min-w-0 bg-white relative overflow-hidden">
+        
+        <!-- Date Navigation -->
+        <div class="flex items-center justify-between px-3 py-2 border-b bg-slate-50 flex-shrink-0 shadow-sm z-10">
+            <button id="prev-btn" class="p-2 bg-white border rounded-full hover:bg-slate-100 active:scale-90 transition text-slate-600"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+            <div class="text-center" id="date-display">
+                <span class="text-sm font-bold text-slate-700 block">--/--</span>
+            </div>
+            <button id="next-btn" class="p-2 bg-white border rounded-full hover:bg-slate-100 active:scale-90 transition text-slate-600"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+        </div>
+
+        <!-- Schedule Table -->
+        <div class="flex-1 overflow-auto bg-slate-50/30 relative" id="schedule-scroll">
+            <table class="w-full border-collapse mb-24"> <!-- Bottom margin for scroll space -->
+                <thead class="bg-slate-50 text-slate-500 text-xs shadow-sm">
+                    <tr id="header-row"></tr>
+                </thead>
+                <tbody id="body-rows"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Task Palette (Footer) -->
+    <div class="bg-white border-t shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-40 flex flex-col flex-shrink-0 transition-all duration-300 relative" style="height: 35vh; max-height: 300px;">
+        <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-white border px-3 py-0.5 rounded-t-lg text-[10px] text-slate-400 font-bold shadow-sm">PALETTE</div>
+        
+        <div class="flex justify-between items-center px-4 py-2 border-b bg-slate-50/80 backdrop-blur-sm">
+            <span class="text-xs font-bold text-slate-500 flex items-center gap-1">
+                <i data-lucide="palette" class="w-3 h-3"></i> カラー＆タスク
+            </span>
+            <div class="flex gap-2">
+                <button onclick="addTask()" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded-full hover:bg-indigo-700 active:scale-95 flex items-center gap-1 shadow-sm transition-colors" id="add-btn">
+                    <i data-lucide="plus" class="w-3 h-3"></i> 追加
+                </button>
+                <button onclick="toggleDeleteMode()" id="delete-mode-btn" class="text-slate-400 hover:text-red-500 hover:bg-red-50 px-2 py-1 rounded-full transition-colors flex items-center gap-1 text-xs border border-transparent">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i> 整理
+                </button>
+            </div>
+        </div>
+        
+        <!-- Palette Container -->
+        <div class="flex-1 overflow-y-auto p-2 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 content-start bg-slate-50/30" id="palette-container">
+            <!-- Palette Items Generated JS -->
+        </div>
+    </div>
+
+    <!-- Detail Edit Modal (Task) -->
+    <div id="detail-modal" class="fixed inset-0 bg-black/60 z-[100] hidden flex items-center justify-center p-4 backdrop-blur-sm opacity-0 transition-opacity duration-200">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 transition-transform duration-200 ring-1 ring-black/5" id="modal-content">
+            <div class="p-4 border-b flex justify-between items-center bg-slate-50">
+                <h3 class="font-bold text-slate-700 flex items-center gap-2 text-base">
+                    <div id="modal-task-color" class="w-4 h-4 rounded-full bg-gray-300 ring-2 ring-white shadow-sm"></div>
+                    <span id="modal-task-name">タスク名</span>
+                </h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-200 rounded-full transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="p-5">
+                <label class="block text-xs font-bold text-slate-500 mb-2 flex items-center gap-1">
+                    <i data-lucide="pencil" class="w-3 h-3"></i> 詳細・追記メモ
+                </label>
+                <textarea id="modal-detail-input" class="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none bg-white shadow-inner" rows="3" placeholder="例: A会議室にて / 進捗80%"></textarea>
+                <div class="text-[10px] text-slate-400 mt-2 text-right">※空欄保存で詳細なし</div>
+            </div>
+            <div class="p-4 bg-slate-50 border-t flex justify-between gap-3">
+                <button onclick="deleteCell()" class="px-4 py-2.5 text-red-500 text-sm font-bold hover:bg-red-50 rounded-lg flex items-center gap-1.5 transition-colors border border-transparent hover:border-red-100">
+                    <i data-lucide="eraser" class="w-4 h-4"></i> 塗りを消す
+                </button>
+                <button onclick="saveDetail()" class="flex-1 px-4 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 shadow-lg shadow-indigo-200 active:scale-95 transition-all flex items-center justify-center gap-2">
+                    <i data-lucide="check" class="w-4 h-4"></i> 保存する
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Memo Edit Modal (Daily Memo) -->
+    <div id="memo-modal" class="fixed inset-0 bg-black/60 z-[100] hidden flex items-center justify-center p-4 backdrop-blur-sm opacity-0 transition-opacity duration-200">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 transition-transform duration-200 ring-1 ring-black/5" id="memo-modal-content">
+            <div class="p-4 border-b flex justify-between items-center bg-yellow-50">
+                <h3 class="font-bold text-yellow-800 flex items-center gap-2 text-base">
+                    <i data-lucide="sticky-note" class="w-4 h-4"></i>
+                    <span id="memo-modal-date">--/-- のメモ</span>
+                </h3>
+                <button onclick="closeMemoModal()" class="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-200 rounded-full transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="p-5">
+                <textarea id="memo-input" class="w-full border border-yellow-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 focus:outline-none bg-yellow-50/50 shadow-inner leading-relaxed" rows="8" placeholder="ここにメモを入力..."></textarea>
+            </div>
+            <div class="p-4 bg-slate-50 border-t flex justify-end gap-3">
+                <button onclick="saveMemo()" class="flex-1 px-4 py-2.5 bg-yellow-500 text-white text-sm font-bold rounded-lg hover:bg-yellow-600 shadow-lg shadow-yellow-200 active:scale-95 transition-all flex items-center justify-center gap-2">
+                    <i data-lucide="check" class="w-4 h-4"></i> メモを保存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Color Picker Modal -->
+    <div id="color-modal" class="fixed inset-0 bg-black/60 z-[110] hidden flex items-center justify-center p-4 backdrop-blur-sm opacity-0 transition-opacity duration-200">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-xs overflow-hidden transform scale-95 transition-transform duration-200 ring-1 ring-black/5" id="color-modal-content">
+            <div class="p-3 border-b flex justify-between items-center bg-slate-50">
+                <h3 class="font-bold text-slate-700 text-sm">カラー選択</h3>
+                <button onclick="closeColorModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="p-4 grid grid-cols-4 gap-3 bg-slate-50" id="color-grid">
+                <!-- JS Generated -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Config & Data ---
+        const CONFIG = {
+            storageKey: 'task_painter_v5',
+            colors: [
+                'bg-red-100 text-red-800', 'bg-orange-100 text-orange-800', 'bg-amber-100 text-amber-800',
+                'bg-yellow-100 text-yellow-800', 'bg-lime-100 text-lime-800', 'bg-green-100 text-green-800',
+                'bg-emerald-100 text-emerald-800', 'bg-teal-100 text-teal-800', 'bg-cyan-100 text-cyan-800',
+                'bg-sky-100 text-sky-800', 'bg-blue-100 text-blue-800', 'bg-indigo-100 text-indigo-800',
+                'bg-violet-100 text-violet-800', 'bg-purple-100 text-purple-800', 'bg-fuchsia-100 text-fuchsia-800',
+                'bg-pink-100 text-pink-800', 'bg-rose-100 text-rose-800', 'bg-slate-200 text-slate-800'
+            ],
+            hours: { start: 9, end: 19 },
+            cursorId: 'CURSOR_MODE'
+        };
+
+        const INITIAL_TASKS = [
+            { id: 't1', name: '🎨 デザイン', color: 'bg-pink-100 text-pink-800' },
+            { id: 't2', name: '💻 開発', color: 'bg-indigo-100 text-indigo-800' },
+            { id: 't3', name: '🗣 MTG', color: 'bg-blue-100 text-blue-800' },
+            { id: 't4', name: '🍱 ランチ', color: 'bg-orange-100 text-orange-800' },
+            { id: 't5', name: '🚃 移動', color: 'bg-slate-200 text-slate-600' },
+            { id: 't6', name: '✨ 調整', color: 'bg-emerald-100 text-emerald-800' },
+        ];
+
+        let state = {
+            tasks: [],
+            schedule: {}, 
+            viewDate: new Date('2025-11-24'),
+            activeTaskId: CONFIG.cursorId, 
+            editingCell: null,
+            editingMemoDate: null, // メモ編集中の日付
+            deleteMode: false,
+            changingColorTaskId: null
+        };
+
+        // --- Core ---
+        function init() {
+            loadData();
+            if (!state.activeTaskId) state.activeTaskId = CONFIG.cursorId;
+            renderAll();
+            setupEvents();
+        }
+
+        function loadData() {
+            const json = localStorage.getItem(CONFIG.storageKey);
+            if(json) {
+                const data = JSON.parse(json);
+                state.tasks = data.tasks || INITIAL_TASKS;
+                state.schedule = data.schedule || {};
+            } else {
+                state.tasks = JSON.parse(JSON.stringify(INITIAL_TASKS));
+                state.schedule = {};
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem(CONFIG.storageKey, JSON.stringify({
+                tasks: state.tasks,
+                schedule: state.schedule
+            }));
+        }
+
+        // --- Render ---
+        function renderAll() {
+            renderHeader();
+            renderBody();
+            renderPalette();
+            lucide.createIcons();
+        }
+
+        function getDates() {
+            const dates = [];
+            for(let i=0; i<7; i++) {
+                const d = new Date(state.viewDate);
+                d.setDate(d.getDate() + i);
+                dates.push(d);
+            }
+            return dates;
+        }
+
+        function renderHeader() {
+            const dates = getDates();
+            const startStr = `${dates[0].getMonth()+1}/${dates[0].getDate()}`;
+            const endStr = `${dates[6].getMonth()+1}/${dates[6].getDate()}`;
+            document.getElementById('date-display').innerHTML = `<span class="text-[10px] text-slate-400 font-mono tracking-widest">WEEKLY</span><div class="font-bold text-slate-800 text-lg leading-tight">${startStr} - ${endStr}</div>`;
+
+            let html = `<th class="sticky-corner bg-slate-50 p-2 w-10 border-b border-r text-[10px] z-40 text-slate-400 font-mono">Time</th>`;
+            const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+            dates.forEach(d => {
+                const dayIdx = d.getDay();
+                const color = dayIdx===0?'text-red-500 bg-red-50/30': dayIdx===6?'text-blue-500 bg-blue-50/30':'text-slate-600';
+                html += `<th class="sticky-header bg-slate-50 min-w-[90px] md:min-w-[120px] p-2 border-b border-r z-30 ${color}">
+                    <div class="font-bold text-sm">${d.getDate()}</div>
+                    <div class="text-[9px] opacity-75 font-mono tracking-wide">${days[dayIdx]}</div>
+                </th>`;
+            });
+            document.getElementById('header-row').innerHTML = html;
+        }
+
+        function renderBody() {
+            const dates = getDates();
+            const dateStrs = dates.map(d => d.toISOString().split('T')[0]);
+            let html = '';
+
+            // Time Slots
+            const times = [];
+            for(let h=CONFIG.hours.start; h<CONFIG.hours.end; h++) {
+                times.push(`${h}:00`, `${h}:30`);
+            }
+
+            times.forEach(t => {
+                html += `<tr class="h-12 md:h-10">
+                    <td class="sticky-col bg-white p-1 text-[10px] text-slate-400 font-mono text-center border-b border-r z-20 select-none">${t}</td>`;
+                
+                dateStrs.forEach(d => {
+                    const cellData = state.schedule[d]?.[t];
+                    const taskId = (typeof cellData === 'string') ? cellData : (cellData?.taskId || null);
+                    const detail = (typeof cellData === 'object') ? (cellData?.detail || '') : '';
+
+                    const task = state.tasks.find(tsk => tsk.id === taskId);
+                    
+                    let content = '';
+                    let classes = 'bg-white hover:bg-slate-50';
+                    let borderClass = 'border-slate-100';
+                    
+                    if (task) {
+                        classes = `${task.color} cursor-pointer hover:brightness-95 transition-all`;
+                        borderClass = 'border-white/20';
+                        content = `
+                            <div class="flex flex-col items-center justify-center h-full w-full pointer-events-none overflow-hidden px-1 pop-in">
+                                <span class="font-bold text-xs leading-tight truncate w-full text-center drop-shadow-sm">${task.name}</span>
+                                ${detail ? `<div class="text-[9px] opacity-90 truncate w-full text-center leading-tight bg-white/40 rounded-sm px-1 mt-0.5 font-medium shadow-sm max-w-[90%]">${detail}</div>` : ''}
+                            </div>
+                        `;
+                    }
+
+                    html += `<td class="border-b border-r ${borderClass} p-0 relative transition-all active:scale-95 duration-75" 
+                        onclick="handleCellClick('${d}', '${t}', '${taskId}')">
+                        <div class="absolute inset-0 p-0.5 flex items-center justify-center ${classes}">
+                            ${content}
+                        </div>
+                    </td>`;
+                });
+                html += `</tr>`;
+            });
+
+            // Note Row (Moved to Bottom)
+            html += `<tr><td class="sticky-col bg-yellow-50/50 p-1 text-[9px] font-bold text-center border-t border-r border-slate-200 z-20 text-yellow-600">MEMO</td>`;
+            dateStrs.forEach(d => {
+                const note = state.schedule[d]?.note || '';
+                const hasNote = note.length > 0;
+                html += `<td class="border-t border-r border-slate-200 bg-yellow-50/20 p-1 cursor-pointer hover:bg-yellow-100 transition-colors relative" onclick="openMemoModal('${d}')">
+                    <div class="w-full h-full min-h-[40px] flex items-center justify-center px-1">
+                        <div class="text-xs text-slate-600 truncate w-full text-center ${hasNote ? 'font-medium' : 'text-slate-300'}">
+                            ${hasNote ? note : '<i data-lucide="plus" class="w-3 h-3 mx-auto opacity-30"></i>'}
+                        </div>
+                    </div>
+                </td>`;
+            });
+            html += `</tr>`;
+
+            document.getElementById('body-rows').innerHTML = html;
+        }
+
+        function renderPalette() {
+            const container = document.getElementById('palette-container');
+            const deleteBtn = document.getElementById('delete-mode-btn');
+            const addBtn = document.getElementById('add-btn');
+
+            if (state.deleteMode) {
+                deleteBtn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> 完了`;
+                deleteBtn.className = "bg-red-500 text-white px-3 py-1 rounded-full transition-colors flex items-center gap-1 text-xs shadow-md border border-red-600 animate-pulse";
+                addBtn.disabled = true;
+                addBtn.classList.add('opacity-30');
+            } else {
+                deleteBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> 整理`;
+                deleteBtn.className = "text-slate-400 hover:text-red-500 hover:bg-red-50 px-2 py-1 rounded-full transition-colors flex items-center gap-1 text-xs border border-transparent";
+                addBtn.disabled = false;
+                addBtn.classList.remove('opacity-30');
+            }
+
+            let html = '';
+
+            // Cursor Item
+            if (!state.deleteMode) {
+                const isCursorSelected = state.activeTaskId === CONFIG.cursorId;
+                html += `
+                    <div onclick="setActiveTask('${CONFIG.cursorId}')" 
+                        class="palette-item relative rounded-lg p-2 cursor-pointer transition-all border border-slate-200 bg-white flex flex-col items-center justify-center gap-1 ${isCursorSelected ? 'selected ring-2 ring-offset-1 ring-slate-400 bg-slate-50' : 'opacity-80 hover:opacity-100 hover:bg-slate-50'}">
+                        <i data-lucide="mouse-pointer-2" class="w-6 h-6 ${isCursorSelected ? 'text-indigo-600' : 'text-slate-400'}"></i>
+                        <span class="text-[10px] font-bold ${isCursorSelected ? 'text-indigo-600' : 'text-slate-400'}">編集のみ</span>
+                        ${isCursorSelected ? '<div class="absolute -top-1 -right-1 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>' : ''}
+                    </div>
+                `;
+            }
+
+            // Task Items
+            html += state.tasks.map(t => {
+                const isSelected = t.id === state.activeTaskId;
+                
+                if (state.deleteMode) {
+                    return `
+                        <div onclick="window.confirmDeleteTask('${t.id}')" 
+                            class="palette-item relative rounded-lg p-2 cursor-pointer transition-all border-2 border-red-400 bg-red-50 shake-anim hover:bg-red-100">
+                            <div class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center shadow-sm z-10"><i data-lucide="x" class="w-3 h-3"></i></div>
+                            <div class="flex items-center gap-2 opacity-70">
+                                <div class="w-2 h-8 rounded-full bg-slate-300"></div>
+                                <div class="flex-1 min-w-0">
+                                    <span class="block w-full font-bold text-xs truncate text-slate-500">${t.name}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div onclick="setActiveTask('${t.id}')" 
+                        class="palette-item relative rounded-lg p-2 cursor-pointer transition-all border border-transparent ${t.color} ${isSelected ? 'selected ring-2 ring-offset-1 ring-indigo-500/50' : 'opacity-80 hover:opacity-100 hover:shadow-sm'}">
+                        <div class="flex items-center gap-2">
+                            <div class="w-2 h-8 rounded-full bg-black/10"></div>
+                            <div class="flex-1 min-w-0">
+                                <input type="text" value="${t.name}" onchange="updateTaskName('${t.id}', this.value)" 
+                                    class="w-full bg-transparent font-bold text-xs focus:outline-none focus:bg-white/50 rounded px-0.5 text-inherit"
+                                    onclick="event.stopPropagation()">
+                            </div>
+                            <button onclick="event.stopPropagation(); openColorPicker('${t.id}')" class="p-1.5 rounded-full hover:bg-black/10 active:scale-90 transition-transform"><i data-lucide="droplet" class="w-3 h-3 opacity-60"></i></button>
+                        </div>
+                        ${isSelected ? '<div class="absolute -top-1 -right-1 bg-indigo-500 text-white rounded-full p-0.5 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>' : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            container.innerHTML = html;
+            lucide.createIcons();
+        }
+
+        // --- Logic ---
+        function setActiveTask(id) {
+            state.activeTaskId = id;
+            renderPalette();
+        }
+
+        function toggleDeleteMode() {
+            state.deleteMode = !state.deleteMode;
+            renderPalette();
+        }
+
+        window.confirmDeleteTask = function(id) {
+            if(confirm('このタスクを削除しますか？\n（既に塗られているスケジュール箇所も色が消えます）')) {
+                state.tasks = state.tasks.filter(t => t.id !== id);
+                if(state.activeTaskId === id) {
+                    state.activeTaskId = CONFIG.cursorId;
+                }
+                saveData();
+                renderAll(); 
+            }
+        };
+
+        function handleCellClick(date, time, currentTaskId) {
+            if (state.deleteMode) return;
+
+            if (state.activeTaskId === CONFIG.cursorId) {
+                if (currentTaskId) {
+                    openDetailModal(date, time, currentTaskId);
+                }
+                return;
+            }
+
+            if (currentTaskId === state.activeTaskId) {
+                openDetailModal(date, time, currentTaskId);
+            } else {
+                updateSchedule(date, time, state.activeTaskId, ''); 
+            }
+        }
+
+        function updateSchedule(date, time, taskId, detail) {
+            if(!state.schedule[date]) state.schedule[date] = {};
+            if(taskId) {
+                state.schedule[date][time] = { taskId, detail };
+            } else {
+                delete state.schedule[date][time];
+            }
+            saveData();
+            renderBody(); 
+        }
+
+        function updateMemo(date, val) {
+            if(!state.schedule[date]) state.schedule[date] = {};
+            state.schedule[date].note = val;
+            saveData();
+            renderBody();
+        }
+
+        // --- Task Management ---
+        function addTask() {
+            if(state.deleteMode) return;
+            const newId = 't' + Date.now();
+            
+            const usedColors = state.tasks.map(t => t.color);
+            const unusedColors = CONFIG.colors.filter(c => !usedColors.includes(c));
+            let color;
+            
+            if(unusedColors.length > 0) {
+                color = unusedColors[Math.floor(Math.random() * unusedColors.length)];
+            } else {
+                color = CONFIG.colors[Math.floor(Math.random() * CONFIG.colors.length)];
+            }
+
+            state.tasks.push({ id: newId, name: '新規', color });
+            state.activeTaskId = newId;
+            saveData();
+            renderPalette();
+            const pContainer = document.getElementById('palette-container');
+            setTimeout(() => pContainer.scrollTop = pContainer.scrollHeight, 50);
+        }
+
+        function updateTaskName(id, name) {
+            const t = state.tasks.find(t => t.id === id);
+            if(t) {
+                t.name = name;
+                saveData();
+                renderBody();
+            }
+        }
+
+        // --- Color Picker Logic ---
+        function openColorPicker(taskId) {
+            state.changingColorTaskId = taskId;
+            const grid = document.getElementById('color-grid');
+            grid.innerHTML = CONFIG.colors.map(c => `
+                <div onclick="selectColor('${c}')" class="w-full h-10 rounded-lg cursor-pointer ${c} border border-black/10 hover:scale-105 transition-transform"></div>
+            `).join('');
+
+            const modal = document.getElementById('color-modal');
+            const content = document.getElementById('color-modal-content');
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                modal.classList.remove('opacity-0');
+                content.classList.remove('scale-95');
+                content.classList.add('scale-100');
+            });
+        }
+
+        function closeColorModal() {
+            const modal = document.getElementById('color-modal');
+            const content = document.getElementById('color-modal-content');
+            modal.classList.add('opacity-0');
+            content.classList.remove('scale-100');
+            content.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                state.changingColorTaskId = null;
+            }, 200);
+        }
+
+        function selectColor(color) {
+            if(state.changingColorTaskId) {
+                const task = state.tasks.find(t => t.id === state.changingColorTaskId);
+                if(task) {
+                    task.color = color;
+                    saveData();
+                    renderAll();
+                }
+            }
+            closeColorModal();
+        }
+
+        // --- Detail Modal Logic (Task) ---
+        function openDetailModal(date, time, taskId) {
+            state.editingCell = { date, time };
+            const task = state.tasks.find(t => t.id === taskId);
+            const cellData = state.schedule[date]?.[time];
+            const currentDetail = (typeof cellData === 'object') ? (cellData?.detail || '') : '';
+
+            document.getElementById('modal-task-name').textContent = task ? task.name : 'Unknown';
+            const colorDiv = document.getElementById('modal-task-color');
+            colorDiv.className = `w-4 h-4 rounded-full shadow-sm ring-1 ring-slate-200 ${task ? task.color.split(' ')[0] : 'bg-gray-400'}`;
+            document.getElementById('modal-detail-input').value = currentDetail;
+
+            const modal = document.getElementById('detail-modal');
+            const content = document.getElementById('modal-content');
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                modal.classList.remove('opacity-0');
+                content.classList.remove('scale-95');
+                content.classList.add('scale-100');
+            });
+            document.getElementById('modal-detail-input').focus();
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('detail-modal');
+            const content = document.getElementById('modal-content');
+            modal.classList.add('opacity-0');
+            content.classList.remove('scale-100');
+            content.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                state.editingCell = null;
+            }, 200);
+        }
+
+        function saveDetail() {
+            if(!state.editingCell) return;
+            const { date, time } = state.editingCell;
+            const val = document.getElementById('modal-detail-input').value;
+            const current = state.schedule[date][time];
+            updateSchedule(date, time, current.taskId, val);
+            closeModal();
+        }
+
+        function deleteCell() {
+            if(!state.editingCell) return;
+            const { date, time } = state.editingCell;
+            updateSchedule(date, time, null, '');
+            closeModal();
+        }
+
+        // --- Memo Modal Logic ---
+        function openMemoModal(date) {
+            state.editingMemoDate = date;
+            const note = state.schedule[date]?.note || '';
+            const d = new Date(date);
+            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const title = `${d.getMonth()+1}/${d.getDate()} (${dayNames[d.getDay()]}) のメモ`;
+            
+            document.getElementById('memo-modal-date').textContent = title;
+            document.getElementById('memo-input').value = note;
+            
+            const modal = document.getElementById('memo-modal');
+            const content = document.getElementById('memo-modal-content');
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                modal.classList.remove('opacity-0');
+                content.classList.remove('scale-95');
+                content.classList.add('scale-100');
+            });
+            document.getElementById('memo-input').focus();
+        }
+
+        function closeMemoModal() {
+            const modal = document.getElementById('memo-modal');
+            const content = document.getElementById('memo-modal-content');
+            modal.classList.add('opacity-0');
+            content.classList.remove('scale-100');
+            content.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                state.editingMemoDate = null;
+            }, 200);
+        }
+
+        function saveMemo() {
+            if (!state.editingMemoDate) return;
+            const val = document.getElementById('memo-input').value;
+            updateMemo(state.editingMemoDate, val);
+            closeMemoModal();
+        }
+
+        // --- Helpers ---
+        function setupEvents() {
+            document.getElementById('prev-btn').onclick = () => {
+                state.viewDate.setDate(state.viewDate.getDate() - 7);
+                renderAll();
+            }
+            document.getElementById('next-btn').onclick = () => {
+                state.viewDate.setDate(state.viewDate.getDate() + 7);
+                renderAll();
+            }
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
+
+
