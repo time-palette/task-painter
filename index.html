@@ -14,13 +14,13 @@
         
         /* スティッキーヘッダー & カラム */
         .sticky-header { position: sticky; top: 0; z-index: 30; }
-        .sticky-col { position: sticky; left: 0; z-index: 40; } /* z-indexを上げてデータより手前に */
-        .sticky-corner { position: sticky; top: 0; left: 0; z-index: 50; } /* コーナーは最前面 */
+        .sticky-col { position: sticky; left: 0; z-index: 40; } 
+        .sticky-corner { position: sticky; top: 0; left: 0; z-index: 50; }
 
         /* ズーム制御用変数 */
         :root {
-            --row-height: 40px;   /* 行の高さ */
-            --col-width: 90px;    /* 列の最小幅 */
+            --row-height: 40px;
+            --col-width: 90px;
             --font-scale: 1;
         }
 
@@ -65,28 +65,17 @@
             transform: scale(1.02); 
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
             border-width: 2px;
-            border-color: #4f46e5; /* indigo-600 */
+            border-color: #4f46e5;
         }
 
-        /* スライダーのカスタムスタイル */
-        input[type=range] {
-            -webkit-appearance: none; 
-            background: transparent; 
-        }
+        /* スライダー */
+        input[type=range] { -webkit-appearance: none; background: transparent; }
         input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            height: 14px;
-            width: 14px;
-            border-radius: 50%;
-            background: #4f46e5;
-            margin-top: -5px; 
-            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            -webkit-appearance: none; height: 14px; width: 14px; border-radius: 50%;
+            background: #4f46e5; margin-top: -5px; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
         }
         input[type=range]::-webkit-slider-runnable-track {
-            width: 100%;
-            height: 4px;
-            background: #e2e8f0;
-            border-radius: 2px;
+            width: 100%; height: 4px; background: #e2e8f0; border-radius: 2px;
         }
     </style>
 </head>
@@ -132,14 +121,31 @@
             </div>
         </div>
 
-        <!-- Schedule Table -->
+        <!-- Schedule Table Scroll Area -->
         <div class="flex-1 overflow-auto bg-slate-50/30 relative" id="schedule-scroll">
-            <table class="w-full border-collapse mb-24 table-fixed"> <!-- table-fixedを追加して列幅制御を安定化 -->
+            <table class="w-full border-collapse table-fixed bg-white">
                 <thead class="bg-slate-50 text-slate-500 text-xs shadow-sm">
                     <tr id="header-row"></tr>
                 </thead>
                 <tbody id="body-rows"></tbody>
             </table>
+
+            <!-- Weekly Memo Section (Modified) -->
+            <div class="p-4 md:p-6 mb-24 max-w-4xl mx-auto">
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="bg-slate-50 border-b px-4 py-2 flex items-center justify-between">
+                        <h3 class="font-bold text-slate-600 flex items-center gap-2 text-sm">
+                            <i data-lucide="lightbulb" class="w-4 h-4 text-amber-500"></i>
+                            <span class="tracking-wide">Weekly Memo</span>
+                        </h3>
+                    </div>
+                    <div class="p-0">
+                        <textarea id="weekly-memo-input" 
+                            class="w-full p-4 text-sm text-slate-700 leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-100 min-h-[120px] resize-y bg-slate-50/10 placeholder-slate-300" 
+                            placeholder=""></textarea>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -257,20 +263,22 @@
         let state = {
             tasks: [],
             schedule: {}, 
+            weeklyMemos: {}, 
             viewDate: new Date('2025-11-24'),
             activeTaskId: CONFIG.cursorId, 
             editingCell: null,
             editingMemoDate: null, 
             deleteMode: false,
             changingColorTaskId: null,
-            zoomLevel: 40 // Default row height px
+            zoomLevel: 40 
         };
 
         // --- Core ---
         function init() {
             loadData();
             if (!state.activeTaskId) state.activeTaskId = CONFIG.cursorId;
-            initZoom(); // Zoom初期化
+            initZoom(); 
+            initWeeklyMemo(); 
             renderAll();
             setupEvents();
         }
@@ -281,10 +289,12 @@
                 const data = JSON.parse(json);
                 state.tasks = data.tasks || INITIAL_TASKS;
                 state.schedule = data.schedule || {};
+                state.weeklyMemos = data.weeklyMemos || {};
                 if(data.zoomLevel) state.zoomLevel = data.zoomLevel;
             } else {
                 state.tasks = JSON.parse(JSON.stringify(INITIAL_TASKS));
                 state.schedule = {};
+                state.weeklyMemos = {};
             }
         }
 
@@ -292,6 +302,7 @@
             localStorage.setItem(CONFIG.storageKey, JSON.stringify({
                 tasks: state.tasks,
                 schedule: state.schedule,
+                weeklyMemos: state.weeklyMemos, 
                 zoomLevel: state.zoomLevel
             }));
         }
@@ -312,20 +323,32 @@
 
         function updateZoom(heightPx) {
             const root = document.documentElement;
-            // 高さの設定
             root.style.setProperty('--row-height', `${heightPx}px`);
-            
-            // 幅の計算ロジック
-            // height(15) -> width(52px)
-            // height(60) -> width(100px)
             let colWidth = 52 + (heightPx - 15) * (48 / 45);
             root.style.setProperty('--col-width', `${colWidth}px`);
-
-            // フォントサイズの調整ロジック
-            // height: 40px -> scale: 1
-            // height: 15px -> scale: 0.65
             let scale = 0.65 + ((heightPx - 15) / (60 - 15)) * 0.55; 
             root.style.setProperty('--font-scale', scale);
+        }
+
+        // --- Weekly Memo Logic ---
+        function getWeeklyMemoKey() {
+            const dates = getDates();
+            return dates[0].toISOString().split('T')[0];
+        }
+
+        function initWeeklyMemo() {
+            const memoInput = document.getElementById('weekly-memo-input');
+            memoInput.addEventListener('input', (e) => {
+                const key = getWeeklyMemoKey();
+                state.weeklyMemos[key] = e.target.value;
+                saveData();
+            });
+        }
+
+        function updateWeeklyMemoView() {
+            const key = getWeeklyMemoKey();
+            const memoInput = document.getElementById('weekly-memo-input');
+            memoInput.value = state.weeklyMemos[key] || '';
         }
 
         // --- Render ---
@@ -333,6 +356,7 @@
             renderHeader();
             renderBody();
             renderPalette();
+            updateWeeklyMemoView(); 
             lucide.createIcons();
         }
 
@@ -352,13 +376,11 @@
             const endStr = `${dates[6].getMonth()+1}/${dates[6].getDate()}`;
             document.getElementById('date-display').innerHTML = `<span class="text-[9px] text-slate-400 font-mono tracking-widest block">WEEKLY</span><span class="font-bold text-slate-800 text-sm leading-tight">${startStr} - ${endStr}</span>`;
 
-            // Sticky Corner
             let html = `<th class="sticky-corner bg-slate-50 p-2 w-10 border-b border-r border-slate-200 text-[10px] z-50 text-slate-400 font-mono shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Time</th>`;
             const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
             dates.forEach(d => {
                 const dayIdx = d.getDay();
                 const color = dayIdx===0?'text-red-500 bg-red-50/30': dayIdx===6?'text-blue-500 bg-blue-50/30':'text-slate-600';
-                // Header must have dynamic-col-width to control the column size
                 html += `<th class="sticky-header bg-slate-50 dynamic-col-width p-2 border-b border-r z-30 ${color}">
                     <div class="font-bold text-sm zoom-content">${d.getDate()}</div>
                     <div class="text-[9px] opacity-75 font-mono tracking-wide zoom-content">${days[dayIdx]}</div>
@@ -379,8 +401,6 @@
             }
 
             times.forEach(t => {
-                // Remove 'flex' from td and use inner div for centering
-                // Add bg-slate-50 explicitly to hide scrolling content behind
                 html += `<tr class="schedule-row">
                     <td class="sticky-col bg-slate-50 p-0 text-[10px] text-slate-400 font-mono text-center border-b border-r border-slate-200 z-40 select-none align-middle shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                         <div class="flex items-center justify-center h-full w-full">
@@ -421,7 +441,6 @@
             });
 
             // Note Row
-            // Apply similar sticky styles to the MEMO label
             html += `<tr><td class="sticky-col bg-yellow-50/90 p-1 text-[9px] font-bold text-center border-t border-r border-slate-200 z-40 text-yellow-600 h-10 align-middle shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                         <div class="flex items-center justify-center h-full w-full">MEMO</div>
                     </td>`;
