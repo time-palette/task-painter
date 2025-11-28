@@ -12,10 +12,10 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         
-        /* スティッキーヘッダー */
+        /* スティッキーヘッダー & カラム */
         .sticky-header { position: sticky; top: 0; z-index: 30; }
-        .sticky-col { position: sticky; left: 0; z-index: 20; }
-        .sticky-corner { position: sticky; top: 0; left: 0; z-index: 40; }
+        .sticky-col { position: sticky; left: 0; z-index: 40; } /* z-indexを上げてデータより手前に */
+        .sticky-corner { position: sticky; top: 0; left: 0; z-index: 50; } /* コーナーは最前面 */
 
         /* ズーム制御用変数 */
         :root {
@@ -41,6 +41,9 @@
         .zoom-content {
             font-size: calc(12px * var(--font-scale));
             line-height: 1.1;
+        }
+        .zoom-icon {
+             transform: scale(var(--font-scale));
         }
 
         /* アニメーション */
@@ -131,7 +134,7 @@
 
         <!-- Schedule Table -->
         <div class="flex-1 overflow-auto bg-slate-50/30 relative" id="schedule-scroll">
-            <table class="w-full border-collapse mb-24"> <!-- Bottom margin for scroll space -->
+            <table class="w-full border-collapse mb-24 table-fixed"> <!-- table-fixedを追加して列幅制御を安定化 -->
                 <thead class="bg-slate-50 text-slate-500 text-xs shadow-sm">
                     <tr id="header-row"></tr>
                 </thead>
@@ -349,7 +352,8 @@
             const endStr = `${dates[6].getMonth()+1}/${dates[6].getDate()}`;
             document.getElementById('date-display').innerHTML = `<span class="text-[9px] text-slate-400 font-mono tracking-widest block">WEEKLY</span><span class="font-bold text-slate-800 text-sm leading-tight">${startStr} - ${endStr}</span>`;
 
-            let html = `<th class="sticky-corner bg-slate-50 p-2 w-10 border-b border-r text-[10px] z-40 text-slate-400 font-mono">Time</th>`;
+            // Sticky Corner
+            let html = `<th class="sticky-corner bg-slate-50 p-2 w-10 border-b border-r border-slate-200 text-[10px] z-50 text-slate-400 font-mono shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Time</th>`;
             const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
             dates.forEach(d => {
                 const dayIdx = d.getDay();
@@ -375,8 +379,14 @@
             }
 
             times.forEach(t => {
+                // Remove 'flex' from td and use inner div for centering
+                // Add bg-slate-50 explicitly to hide scrolling content behind
                 html += `<tr class="schedule-row">
-                    <td class="sticky-col bg-white p-0 text-[10px] text-slate-400 font-mono text-center border-b border-r z-20 select-none flex items-center justify-center h-full">${t}</td>`;
+                    <td class="sticky-col bg-slate-50 p-0 text-[10px] text-slate-400 font-mono text-center border-b border-r border-slate-200 z-40 select-none align-middle shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                        <div class="flex items-center justify-center h-full w-full">
+                            ${t}
+                        </div>
+                    </td>`;
                 
                 dateStrs.forEach(d => {
                     const cellData = state.schedule[d]?.[t];
@@ -400,8 +410,6 @@
                         `;
                     }
 
-                    // dynamic-col-width REMOVED from body cells to prevent forced expansion overlap issues
-                    // Added max-w-0 to ensure cells don't expand beyond header width
                     html += `<td class="max-w-0 border-b border-r ${borderClass} p-0 relative transition-all active:scale-95 duration-75" 
                         onclick="handleCellClick('${d}', '${t}', '${taskId}')">
                         <div class="absolute inset-0 p-0.5 flex items-center justify-center ${classes}">
@@ -413,11 +421,13 @@
             });
 
             // Note Row
-            html += `<tr><td class="sticky-col bg-yellow-50/50 p-1 text-[9px] font-bold text-center border-t border-r border-slate-200 z-20 text-yellow-600 h-10 flex items-center justify-center">MEMO</td>`;
+            // Apply similar sticky styles to the MEMO label
+            html += `<tr><td class="sticky-col bg-yellow-50/90 p-1 text-[9px] font-bold text-center border-t border-r border-slate-200 z-40 text-yellow-600 h-10 align-middle shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                        <div class="flex items-center justify-center h-full w-full">MEMO</div>
+                    </td>`;
             dateStrs.forEach(d => {
                 const note = state.schedule[d]?.note || '';
                 const hasNote = note.length > 0;
-                // dynamic-col-width REMOVED, added max-w-0 to strictly contain content
                 html += `<td class="max-w-0 border-t border-r border-slate-200 bg-yellow-50/20 p-1 cursor-pointer hover:bg-yellow-100 transition-colors relative h-10 overflow-hidden" onclick="openMemoModal('${d}')">
                     <div class="w-full h-full flex items-center justify-center px-1">
                         <div class="text-xs text-slate-600 truncate w-full text-center zoom-content ${hasNote ? 'font-medium' : 'text-slate-300'}">
