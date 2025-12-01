@@ -38,7 +38,6 @@
         }
         
         /* 中身の文字サイズなども追従 */
-        /* ベースの文字サイズを少し小さめに設定 */
         .zoom-content-title {
             font-size: calc(10px * var(--font-scale));
             line-height: 1.1;
@@ -53,11 +52,11 @@
 
         /* 日次メモのセルスタイル */
         .daily-memo-cell {
-            white-space: pre-wrap; /* 改行を反映 */
-            word-break: break-all; /* 長い単語も折り返し */
+            white-space: pre-wrap;
+            word-break: break-all;
             font-size: 10px;
             line-height: 1.3;
-            vertical-align: top; /* 上揃え */
+            vertical-align: top;
         }
 
         /* アニメーション */
@@ -73,6 +72,30 @@
             100% { transform: rotate(0deg); }
         }
         .shake-anim { animation: shake 0.2s infinite; }
+
+        /* トースト通知 */
+        #toast {
+            visibility: hidden;
+            min-width: 250px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 8px;
+            padding: 12px;
+            position: fixed;
+            z-index: 1000;
+            left: 50%;
+            bottom: 80px;
+            transform: translateX(-50%);
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s, bottom 0.3s;
+        }
+        #toast.show {
+            visibility: visible;
+            opacity: 1;
+            bottom: 100px;
+        }
 
         /* パレット選択時の強調 */
         .palette-item.selected { 
@@ -162,6 +185,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Toast Notification -->
+    <div id="toast">クリップボードにコピーしました</div>
 
     <!-- Task Palette (Footer) -->
     <div class="bg-white border-t shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-40 flex flex-col flex-shrink-0 transition-all duration-300 relative" style="height: 35vh; max-height: 300px;">
@@ -274,11 +300,22 @@
             { id: 't6', name: '✨ 調整', color: 'bg-emerald-100 text-emerald-800' },
         ];
 
+        // 月曜日始まりに変更: 今週の月曜日を取得
+        function getThisMonday() {
+            const today = new Date();
+            const day = today.getDay(); // 0:Sun, 1:Mon, ..., 6:Sat
+            const diff = today.getDate() - day + (day === 0 ? -6 : 1); // If Sun(0), subtract 6. Else subtract day-1.
+            const monday = new Date(today);
+            monday.setDate(diff);
+            monday.setHours(0, 0, 0, 0);
+            return monday;
+        }
+
         let state = {
             tasks: [],
             schedule: {}, 
             weeklyMemos: {}, 
-            viewDate: new Date('2025-11-24'),
+            viewDate: getThisMonday(), // 初期値を月曜日に設定
             activeTaskId: CONFIG.cursorId, 
             editingCell: null,
             editingMemoDate: null, 
@@ -340,8 +377,6 @@
             root.style.setProperty('--row-height', `${heightPx}px`);
             let colWidth = 52 + (heightPx - 15) * (48 / 45);
             root.style.setProperty('--col-width', `${colWidth}px`);
-            
-            // 少しフォントサイズ調整の係数を変更
             let scale = 0.65 + ((heightPx - 15) / (60 - 15)) * 0.55; 
             root.style.setProperty('--font-scale', scale);
         }
@@ -393,9 +428,11 @@
             document.getElementById('date-display').innerHTML = `<span class="text-[9px] text-slate-400 font-mono tracking-widest block">WEEKLY</span><span class="font-bold text-slate-800 text-sm leading-tight">${startStr} - ${endStr}</span>`;
 
             let html = `<th class="sticky-corner bg-slate-50 p-2 w-10 border-b border-r border-slate-200 text-[10px] z-50 text-slate-400 font-mono shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Time</th>`;
+            // 月曜日始まりなので配列を変更
             const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
             dates.forEach(d => {
                 const dayIdx = d.getDay();
+                // 日曜日(0)と土曜日(6)の色設定
                 const color = dayIdx===0?'text-red-500 bg-red-50/30': dayIdx===6?'text-blue-500 bg-blue-50/30':'text-slate-600';
                 html += `<th class="sticky-header bg-slate-50 dynamic-col-width p-2 border-b border-r z-30 ${color}">
                     <div class="font-bold text-sm zoom-content-title">${d.getDate()}</div>
@@ -438,7 +475,6 @@
                     if (task) {
                         classes = `${task.color} cursor-pointer hover:brightness-95 transition-all`;
                         borderClass = 'border-white/20';
-                        // 修正箇所: タスク名を固定し、メモを残りの領域に表示
                         content = `
                             <div class="flex flex-col items-start justify-start h-full w-full pointer-events-none overflow-hidden px-1 py-0.5 pop-in">
                                 <span class="flex-shrink-0 font-bold zoom-content-title w-full text-left break-words leading-tight drop-shadow-sm mb-0.5" 
@@ -480,7 +516,80 @@
             });
             html += `</tr>`;
 
+            // Copy Button Row
+            html += `<tr><td class="sticky-col bg-white p-1 text-center border-t border-r border-slate-200 z-40 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                        <i data-lucide="copy" class="w-4 h-4 mx-auto text-slate-400"></i>
+                    </td>`;
+            dateStrs.forEach(d => {
+                html += `<td class="max-w-0 border-t border-r border-slate-200 bg-white p-1 text-center">
+                    <button onclick="copyDaySchedule('${d}')" class="w-full h-full flex items-center justify-center p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-indigo-600 transition-colors" title="この日のスケジュールをコピー">
+                        <i data-lucide="copy" class="w-4 h-4"></i>
+                    </button>
+                </td>`;
+            });
+            html += `</tr>`;
+
             document.getElementById('body-rows').innerHTML = html;
+        }
+
+        // --- Copy Function ---
+        function copyDaySchedule(dateStr) {
+            const date = new Date(dateStr);
+            const days = ['日','月','火','水','木','金','土'];
+            const dayName = days[date.getDay()];
+            let text = `【${dateStr.replace(/-/g, '/')} (${dayName})】\n`;
+
+            const times = [];
+            for(let h=CONFIG.hours.start; h<CONFIG.hours.end; h++) {
+                times.push(`${h}:00`, `${h}:30`);
+            }
+
+            let hasTask = false;
+            times.forEach(t => {
+                const cellData = state.schedule[dateStr]?.[t];
+                if (cellData) {
+                    const taskId = (typeof cellData === 'string') ? cellData : cellData.taskId;
+                    const detail = (typeof cellData === 'object') ? (cellData.detail || '') : '';
+                    const task = state.tasks.find(tsk => tsk.id === taskId);
+                    
+                    if (task) {
+                        text += `${t} : ${task.name} ${detail ? `(${detail})` : ''}\n`;
+                        hasTask = true;
+                    }
+                }
+            });
+
+            if (!hasTask) {
+                text += `(予定なし)\n`;
+            }
+
+            const note = state.schedule[dateStr]?.note;
+            if (note) {
+                text += `\n[MEMO]\n${note}\n`;
+            }
+
+            // Create temporary element to copy text
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed'; // Avoid scrolling to bottom
+            document.body.appendChild(textarea);
+            textarea.select();
+            
+            try {
+                document.execCommand('copy');
+                showToast();
+            } catch (err) {
+                console.error('Copy failed', err);
+                alert('コピーに失敗しました');
+            } finally {
+                document.body.removeChild(textarea);
+            }
+        }
+
+        function showToast() {
+            const toast = document.getElementById('toast');
+            toast.className = 'show';
+            setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 3000);
         }
 
         function renderPalette() {
