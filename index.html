@@ -300,11 +300,19 @@
             { id: 't6', name: '✨ 調整', color: 'bg-emerald-100 text-emerald-800' },
         ];
 
+        // 日付ヘルパー: ローカルタイムベースの日付文字列生成
+        function formatDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
         // 月曜日始まりに変更: 今週の月曜日を取得
         function getThisMonday() {
             const today = new Date();
             const day = today.getDay(); // 0:Sun, 1:Mon, ..., 6:Sat
-            const diff = today.getDate() - day + (day === 0 ? -6 : 1); // If Sun(0), subtract 6. Else subtract day-1.
+            const diff = today.getDate() - day + (day === 0 ? -6 : 1);
             const monday = new Date(today);
             monday.setDate(diff);
             monday.setHours(0, 0, 0, 0);
@@ -315,7 +323,7 @@
             tasks: [],
             schedule: {}, 
             weeklyMemos: {}, 
-            viewDate: getThisMonday(), // 初期値を月曜日に設定
+            viewDate: getThisMonday(), 
             activeTaskId: CONFIG.cursorId, 
             editingCell: null,
             editingMemoDate: null, 
@@ -384,7 +392,7 @@
         // --- Weekly Memo Logic ---
         function getWeeklyMemoKey() {
             const dates = getDates();
-            return dates[0].toISOString().split('T')[0];
+            return formatDate(dates[0]); // toISOString() をやめて formatDate() を使用
         }
 
         function initWeeklyMemo() {
@@ -428,11 +436,9 @@
             document.getElementById('date-display').innerHTML = `<span class="text-[9px] text-slate-400 font-mono tracking-widest block">WEEKLY</span><span class="font-bold text-slate-800 text-sm leading-tight">${startStr} - ${endStr}</span>`;
 
             let html = `<th class="sticky-corner bg-slate-50 p-2 w-10 border-b border-r border-slate-200 text-[10px] z-50 text-slate-400 font-mono shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Time</th>`;
-            // 月曜日始まりなので配列を変更
-            const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+            const days = ['日','月','火','水','木','金','土'];
             dates.forEach(d => {
                 const dayIdx = d.getDay();
-                // 日曜日(0)と土曜日(6)の色設定
                 const color = dayIdx===0?'text-red-500 bg-red-50/30': dayIdx===6?'text-blue-500 bg-blue-50/30':'text-slate-600';
                 html += `<th class="sticky-header bg-slate-50 dynamic-col-width p-2 border-b border-r z-30 ${color}">
                     <div class="font-bold text-sm zoom-content-title">${d.getDate()}</div>
@@ -444,7 +450,8 @@
 
         function renderBody() {
             const dates = getDates();
-            const dateStrs = dates.map(d => d.toISOString().split('T')[0]);
+            // toISOString() をやめて formatDate() を使用
+            const dateStrs = dates.map(d => formatDate(d));
             let html = '';
 
             // Time Slots
@@ -568,10 +575,9 @@
                 text += `\n[MEMO]\n${note}\n`;
             }
 
-            // Create temporary element to copy text
             const textarea = document.createElement('textarea');
             textarea.value = text;
-            textarea.style.position = 'fixed'; // Avoid scrolling to bottom
+            textarea.style.position = 'fixed'; 
             document.body.appendChild(textarea);
             textarea.select();
             
