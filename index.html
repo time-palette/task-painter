@@ -129,9 +129,12 @@
                 <div class="text-[10px] opacity-90 font-mono tracking-wider">Paint Your Schedule</div>
             </div>
         </div>
-        <div class="flex gap-2 text-[10px] md:text-xs bg-black/20 px-3 py-1 rounded-full items-center backdrop-blur-sm border border-white/10">
-            <i data-lucide="mouse-pointer-click" class="w-3 h-3"></i>
-            <span>Tap to Paint</span>
+        <div class="flex gap-2 items-center">
+            <!-- Undo Button -->
+            <button onclick="undo()" id="undo-btn" class="text-white bg-white/20 hover:bg-white/30 disabled:opacity-30 disabled:cursor-not-allowed px-3 py-1.5 rounded-full flex items-center gap-1 transition-all backdrop-blur-sm border border-white/10" disabled>
+                <i data-lucide="undo-2" class="w-4 h-4"></i>
+                <span class="text-xs font-bold">元に戻す</span>
+            </button>
         </div>
     </header>
 
@@ -187,7 +190,7 @@
     </div>
 
     <!-- Toast Notification -->
-    <div id="toast">クリップボードにコピーしました</div>
+    <div id="toast"></div>
 
     <!-- Task Palette (Footer) -->
     <div class="bg-white border-t shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-40 flex flex-col flex-shrink-0 transition-all duration-300 relative" style="height: 35vh; max-height: 300px;">
@@ -300,7 +303,6 @@
             { id: 't6', name: '✨ 調整', color: 'bg-emerald-100 text-emerald-800' },
         ];
 
-        // 日付ヘルパー: ローカルタイムベースの日付文字列生成
         function formatDate(date) {
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -308,7 +310,6 @@
             return `${year}-${month}-${day}`;
         }
 
-        // 月曜日始まりに変更: 今週の月曜日を取得
         function getThisMonday() {
             const today = new Date();
             const day = today.getDay(); // 0:Sun, 1:Mon, ..., 6:Sat
@@ -332,6 +333,42 @@
             zoomLevel: 40 
         };
 
+        // --- History / Undo System ---
+        let historyStack = [];
+
+        function pushHistory() {
+            if(historyStack.length > 20) historyStack.shift();
+            historyStack.push(JSON.stringify({
+                tasks: state.tasks,
+                schedule: state.schedule,
+                weeklyMemos: state.weeklyMemos
+            }));
+            updateUndoButton();
+        }
+
+        function undo() {
+            if(historyStack.length === 0) return;
+            const prevState = JSON.parse(historyStack.pop());
+            state.tasks = prevState.tasks;
+            state.schedule = prevState.schedule;
+            state.weeklyMemos = prevState.weeklyMemos;
+            saveData();
+            renderAll();
+            updateUndoButton();
+            showToast("元に戻しました");
+        }
+
+        function updateUndoButton() {
+            const btn = document.getElementById('undo-btn');
+            if (historyStack.length > 0) {
+                btn.disabled = false;
+                btn.classList.remove('opacity-30', 'cursor-not-allowed');
+            } else {
+                btn.disabled = true;
+                btn.classList.add('opacity-30', 'cursor-not-allowed');
+            }
+        }
+
         // --- Core ---
         function init() {
             loadData();
@@ -340,6 +377,7 @@
             initWeeklyMemo(); 
             renderAll();
             setupEvents();
+            updateUndoButton();
         }
 
         function loadData() {
@@ -392,11 +430,22 @@
         // --- Weekly Memo Logic ---
         function getWeeklyMemoKey() {
             const dates = getDates();
-            return formatDate(dates[0]); // toISOString() をやめて formatDate() を使用
+            return formatDate(dates[0]);
         }
 
         function initWeeklyMemo() {
             const memoInput = document.getElementById('weekly-memo-input');
+            
+            // Focus時に状態保存（Undo用）
+            memoInput.addEventListener('focus', () => {
+                // Focus時の状態を一時保持はしないが、変更前の状態としてpushHistoryするのは変更確定時
+                // ここでは何もしない（inputでpushHistoryすると重すぎるため）
+                // 簡易実装として、入力開始時にヒストリーに入れるのは難しいので
+                // ここでは「変更があったらblur時に保存」とするが、Undoのためには変更前の状態が必要。
+                // よって、Focus時に現在の状態をHistoryに積むのが一番安全（変更がなくてもUndoスタックが増えるが許容）
+                pushHistory();
+            });
+
             memoInput.addEventListener('input', (e) => {
                 const key = getWeeklyMemoKey();
                 state.weeklyMemos[key] = e.target.value;
@@ -450,7 +499,6 @@
 
         function renderBody() {
             const dates = getDates();
-            // toISOString() をやめて formatDate() を使用
             const dateStrs = dates.map(d => formatDate(d));
             let html = '';
 
@@ -583,7 +631,7 @@
             
             try {
                 document.execCommand('copy');
-                showToast();
+                showToast("クリップボードにコピーしました");
             } catch (err) {
                 console.error('Copy failed', err);
                 alert('コピーに失敗しました');
@@ -592,8 +640,9 @@
             }
         }
 
-        function showToast() {
+        function showToast(msg) {
             const toast = document.getElementById('toast');
+            toast.textContent = msg;
             toast.className = 'show';
             setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 3000);
         }
@@ -657,7 +706,7 @@
                             <div class="flex-1 min-w-0">
                                 <input type="text" value="${t.name}" onchange="updateTaskName('${t.id}', this.value)" 
                                     class="w-full bg-transparent font-bold text-xs focus:outline-none focus:bg-white/50 rounded px-0.5 text-inherit"
-                                    onclick="event.stopPropagation()">
+                                    onclick="event.stopPropagation(); pushHistory()"> <!-- push history on focus maybe better but simple here -->
                             </div>
                             <button onclick="event.stopPropagation(); openColorPicker('${t.id}')" class="p-1.5 rounded-full hover:bg-black/10 active:scale-90 transition-transform"><i data-lucide="droplet" class="w-3 h-3 opacity-60"></i></button>
                         </div>
@@ -682,6 +731,7 @@
         }
 
         window.confirmDeleteTask = function(id) {
+            pushHistory(); // 削除前に履歴保存
             if(confirm('このタスクを削除しますか？\n（既に塗られているスケジュール箇所も色が消えます）')) {
                 state.tasks = state.tasks.filter(t => t.id !== id);
                 if(state.activeTaskId === id) {
@@ -689,6 +739,8 @@
                 }
                 saveData();
                 renderAll(); 
+            } else {
+                historyStack.pop(); // キャンセル時は履歴戻す
             }
         };
 
@@ -705,6 +757,7 @@
             if (currentTaskId === state.activeTaskId) {
                 openDetailModal(date, time, currentTaskId);
             } else {
+                pushHistory(); // 変更前に履歴保存
                 updateSchedule(date, time, state.activeTaskId, ''); 
             }
         }
@@ -730,6 +783,7 @@
         // --- Task Management ---
         function addTask() {
             if(state.deleteMode) return;
+            pushHistory(); // 追加前に履歴保存
             const newId = 't' + Date.now();
             
             const usedColors = state.tasks.map(t => t.color);
@@ -751,6 +805,8 @@
         }
 
         function updateTaskName(id, name) {
+            // inputのonchangeで呼ばれるため、変更前の履歴保存はinput要素のonclick/focusでやるか、
+            // 簡易的にここに来る前にhistory保存が必要だが、input要素に直書きした
             const t = state.tasks.find(t => t.id === id);
             if(t) {
                 t.name = name;
@@ -791,6 +847,7 @@
 
         function selectColor(color) {
             if(state.changingColorTaskId) {
+                pushHistory(); // 色変更前に履歴保存
                 const task = state.tasks.find(t => t.id === state.changingColorTaskId);
                 if(task) {
                     task.color = color;
@@ -838,6 +895,7 @@
 
         function saveDetail() {
             if(!state.editingCell) return;
+            pushHistory(); // 保存前に履歴
             const { date, time } = state.editingCell;
             const val = document.getElementById('modal-detail-input').value;
             const current = state.schedule[date][time];
@@ -847,6 +905,7 @@
 
         function deleteCell() {
             if(!state.editingCell) return;
+            pushHistory(); // 削除前に履歴
             const { date, time } = state.editingCell;
             updateSchedule(date, time, null, '');
             closeModal();
@@ -888,6 +947,7 @@
 
         function saveMemo() {
             if (!state.editingMemoDate) return;
+            pushHistory(); // 保存前に履歴
             const val = document.getElementById('memo-input').value;
             updateMemo(state.editingMemoDate, val);
             closeMemoModal();
