@@ -130,6 +130,17 @@
             </div>
         </div>
         <div class="flex gap-2 items-center">
+            <!-- Save/Load Buttons (New Features) -->
+            <button onclick="exportData()" class="text-white bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full flex items-center gap-1 transition-all backdrop-blur-sm border border-white/10" title="JSONファイルにバックアップ保存">
+                <i data-lucide="download" class="w-4 h-4"></i>
+                <span class="text-xs font-bold hidden md:inline">保存</span>
+            </button>
+            <button onclick="triggerImport()" class="text-white bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full flex items-center gap-1 transition-all backdrop-blur-sm border border-white/10" title="バックアップファイルから復元">
+                <i data-lucide="upload" class="w-4 h-4"></i>
+                <span class="text-xs font-bold hidden md:inline">復元</span>
+            </button>
+            <input type="file" id="import-file" style="display:none" accept=".json" onchange="importData(this)">
+
             <!-- Undo Button -->
             <button onclick="undo()" id="undo-btn" class="text-white bg-white/20 hover:bg-white/30 disabled:opacity-30 disabled:cursor-not-allowed px-3 py-1.5 rounded-full flex items-center gap-1 transition-all backdrop-blur-sm border border-white/10" disabled>
                 <i data-lucide="undo-2" class="w-4 h-4"></i>
@@ -963,6 +974,69 @@
                 state.viewDate.setDate(state.viewDate.getDate() + 7);
                 renderAll();
             }
+        }
+
+        // --- Save / Load / Restore Features (New) ---
+        function exportData() {
+            const dataToSave = {
+                version: 1,
+                timestamp: new Date().toISOString(),
+                data: {
+                    tasks: state.tasks,
+                    schedule: state.schedule,
+                    weeklyMemos: state.weeklyMemos,
+                    zoomLevel: state.zoomLevel
+                }
+            };
+            const jsonString = JSON.stringify(dataToSave, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `task_painter_backup_${new Date().toISOString().slice(0,10)}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            showToast("バックアップファイルを保存しました");
+        }
+
+        function triggerImport() {
+            document.getElementById('import-file').click();
+        }
+
+        function importData(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const jsonString = e.target.result;
+                    const parsed = JSON.parse(jsonString);
+                    // Handle both wrapped format (current) and raw format (potential legacy/manual)
+                    const newData = parsed.data || parsed;
+
+                    if (newData.tasks && newData.schedule) {
+                        pushHistory(); // バックアップから復元する前に現在の状態をUndoスタックへ
+                        state.tasks = newData.tasks;
+                        state.schedule = newData.schedule;
+                        state.weeklyMemos = newData.weeklyMemos || {};
+                        if(newData.zoomLevel) state.zoomLevel = newData.zoomLevel;
+
+                        saveData();
+                        renderAll();
+                        showToast("データを復元しました");
+                    } else {
+                        alert("エラー: データ形式が正しくありません");
+                    }
+                } catch (error) {
+                    console.error(error);
+                    alert("エラー: ファイルを読み込めませんでした");
+                }
+            };
+            reader.readAsText(file);
+            input.value = ''; // Reset for re-selection
         }
 
         window.onload = init;
