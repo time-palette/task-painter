@@ -114,6 +114,22 @@
         input[type=range]::-webkit-slider-runnable-track {
             width: 100%; height: 4px; background: #e2e8f0; border-radius: 2px;
         }
+        
+        /* 日付ピッカーのハック */
+        .date-picker-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+        .date-picker-input {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+            z-index: 10;
+        }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans h-screen flex flex-col overflow-hidden select-none">
@@ -130,7 +146,7 @@
             </div>
         </div>
         <div class="flex gap-2 items-center">
-            <!-- Save/Load Buttons (New Features) -->
+            <!-- Save/Load Buttons -->
             <button onclick="exportData()" class="text-white bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full flex items-center gap-1 transition-all backdrop-blur-sm border border-white/10" title="JSONファイルにバックアップ保存">
                 <i data-lucide="download" class="w-4 h-4"></i>
                 <span class="text-xs font-bold hidden md:inline">保存</span>
@@ -162,6 +178,14 @@
                     <span class="text-xs font-bold text-slate-700 block">--/--</span>
                 </div>
                 <button id="next-btn" class="p-1.5 bg-white border rounded-full hover:bg-slate-100 active:scale-90 transition text-slate-600"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+                
+                <!-- Date Picker Trigger (New Feature) -->
+                <div class="date-picker-wrapper ml-1" title="日付を指定してジャンプ">
+                    <button class="p-1.5 bg-indigo-50 border border-indigo-100 rounded-full hover:bg-indigo-100 active:scale-90 transition text-indigo-600">
+                        <i data-lucide="calendar" class="w-4 h-4"></i>
+                    </button>
+                    <input type="date" id="date-picker-input" class="date-picker-input">
+                </div>
             </div>
 
             <!-- Zoom Slider -->
@@ -449,11 +473,6 @@
             
             // Focus時に状態保存（Undo用）
             memoInput.addEventListener('focus', () => {
-                // Focus時の状態を一時保持はしないが、変更前の状態としてpushHistoryするのは変更確定時
-                // ここでは何もしない（inputでpushHistoryすると重すぎるため）
-                // 簡易実装として、入力開始時にヒストリーに入れるのは難しいので
-                // ここでは「変更があったらblur時に保存」とするが、Undoのためには変更前の状態が必要。
-                // よって、Focus時に現在の状態をHistoryに積むのが一番安全（変更がなくてもUndoスタックが増えるが許容）
                 pushHistory();
             });
 
@@ -816,8 +835,6 @@
         }
 
         function updateTaskName(id, name) {
-            // inputのonchangeで呼ばれるため、変更前の履歴保存はinput要素のonclick/focusでやるか、
-            // 簡易的にここに来る前にhistory保存が必要だが、input要素に直書きした
             const t = state.tasks.find(t => t.id === id);
             if(t) {
                 t.name = name;
@@ -974,9 +991,24 @@
                 state.viewDate.setDate(state.viewDate.getDate() + 7);
                 renderAll();
             }
+
+            // --- Date Picker Logic (New) ---
+            const picker = document.getElementById('date-picker-input');
+            picker.addEventListener('change', (e) => {
+                if(!e.target.value) return;
+                const selectedDate = new Date(e.target.value);
+                
+                // 選択された日付をViewの開始日にセット
+                selectedDate.setHours(0,0,0,0);
+                state.viewDate = selectedDate;
+                
+                renderAll();
+                
+                // 次回のためにリセット（同じ日付を選び直した時にも発火するようにしても良いが、値は残しておくと便利なのでそのまま）
+            });
         }
 
-        // --- Save / Load / Restore Features (New) ---
+        // --- Save / Load / Restore Features ---
         function exportData() {
             const dataToSave = {
                 version: 1,
