@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>タスクPainter</title>
+    <title>タスクPainter Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -251,7 +251,7 @@
         </div>
     </div>
 
-    <!-- Detail Edit Modal (Task) -->
+    <!-- Detail Edit Modal (Schedule Cell) -->
     <div id="detail-modal" class="fixed inset-0 bg-black/60 z-[100] hidden flex items-center justify-center p-4 backdrop-blur-sm opacity-0 transition-opacity duration-200">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 transition-transform duration-200 ring-1 ring-black/5" id="modal-content">
             <div class="p-4 border-b flex justify-between items-center bg-slate-50">
@@ -274,6 +274,37 @@
                 </button>
                 <button onclick="saveDetail()" class="flex-1 px-4 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 shadow-lg shadow-indigo-200 active:scale-95 transition-all flex items-center justify-center gap-2">
                     <i data-lucide="check" class="w-4 h-4"></i> 保存する
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Edit Modal (New!) -->
+    <div id="task-edit-modal" class="fixed inset-0 bg-black/60 z-[100] hidden flex items-center justify-center p-4 backdrop-blur-sm opacity-0 transition-opacity duration-200">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 transition-transform duration-200 ring-1 ring-black/5" id="task-modal-content">
+            <div class="p-4 border-b flex justify-between items-center bg-slate-50">
+                <h3 class="font-bold text-slate-700 flex items-center gap-2 text-base">
+                    <i data-lucide="settings-2" class="w-4 h-4 text-slate-500"></i>
+                    <span>タスク設定</span>
+                </h3>
+                <button onclick="closeTaskEditModal()" class="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-200 rounded-full transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="p-5 flex flex-col gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 mb-1.5">タスク名</label>
+                    <input type="text" id="task-edit-name" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white font-bold" placeholder="タスク名を入力">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                        <i data-lucide="file-text" class="w-3 h-3"></i> マイルストーン・メモ
+                    </label>
+                    <textarea id="task-edit-memo" class="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-slate-50/50 shadow-inner" rows="5" placeholder="マイルストーン、Next Action、要件定義などをここに記録..."></textarea>
+                </div>
+            </div>
+            <div class="p-4 bg-slate-50 border-t flex justify-end gap-3">
+                <button onclick="saveTaskEdit()" class="flex-1 px-4 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 shadow-lg shadow-indigo-200 active:scale-95 transition-all flex items-center justify-center gap-2">
+                    <i data-lucide="check" class="w-4 h-4"></i> 設定を保存
                 </button>
             </div>
         </div>
@@ -316,7 +347,7 @@
     <script>
         // --- Config & Data ---
         const CONFIG = {
-            storageKey: 'task_painter_v5',
+            storageKey: 'task_painter_v5', // Reverted to v5 to restore data!
             colors: [
                 'bg-red-100 text-red-800', 'bg-orange-100 text-orange-800', 'bg-amber-100 text-amber-800',
                 'bg-yellow-100 text-yellow-800', 'bg-lime-100 text-lime-800', 'bg-green-100 text-green-800',
@@ -363,6 +394,7 @@
             activeTaskId: CONFIG.cursorId, 
             editingCell: null,
             editingMemoDate: null, 
+            editingTaskId: null,
             deleteMode: false,
             changingColorTaskId: null,
             zoomLevel: 40 
@@ -423,11 +455,8 @@
             const target = document.getElementById('start-time-row');
             
             if (container && target) {
-                // ヘッダーの高さを考慮（スティッキーヘッダーの下に9:00が来るように調整）
                 const header = document.querySelector('thead');
                 const headerHeight = header ? header.offsetHeight : 50;
-                
-                // ターゲット位置からヘッダー分を引いてスクロール
                 container.scrollTop = target.offsetTop - headerHeight;
             }
         }
@@ -436,12 +465,18 @@
             const json = localStorage.getItem(CONFIG.storageKey);
             if(json) {
                 const data = JSON.parse(json);
-                state.tasks = data.tasks || INITIAL_TASKS;
+                // Migration: 古いデータにはmemoが無いので、読み込み時に付与する
+                state.tasks = (data.tasks || INITIAL_TASKS).map(t => ({
+                    ...t,
+                    memo: t.memo || '' // 既存データにmemoがなければ空文字を入れる
+                }));
                 state.schedule = data.schedule || {};
                 state.weeklyMemos = data.weeklyMemos || {};
                 if(data.zoomLevel) state.zoomLevel = data.zoomLevel;
+                
+                showToast("保存データを読み込みました");
             } else {
-                state.tasks = JSON.parse(JSON.stringify(INITIAL_TASKS));
+                state.tasks = JSON.parse(JSON.stringify(INITIAL_TASKS)).map(t => ({...t, memo: ''}));
                 state.schedule = {};
                 state.weeklyMemos = {};
             }
@@ -488,7 +523,6 @@
         function initWeeklyMemo() {
             const memoInput = document.getElementById('weekly-memo-input');
             
-            // Focus時に状態保存（Undo用）
             memoInput.addEventListener('focus', () => {
                 pushHistory();
             });
@@ -556,7 +590,6 @@
             }
 
             times.forEach(t => {
-                // 9:00の行にIDを付与して後でスクロールできるようにする
                 const rowId = (t === '9:00') ? 'id="start-time-row"' : '';
                 
                 html += `<tr class="schedule-row" ${rowId}>
@@ -732,6 +765,7 @@
             // Task Items
             html += state.tasks.map(t => {
                 const isSelected = t.id === state.activeTaskId;
+                const hasMemo = t.memo && t.memo.trim().length > 0;
                 
                 if (state.deleteMode) {
                     return `
@@ -748,17 +782,28 @@
                     `;
                 }
 
+                // Normal Mode with Edit/Info Button
                 return `
                     <div onclick="setActiveTask('${t.id}')" 
                         class="palette-item relative rounded-lg p-2 cursor-pointer transition-all border border-transparent ${t.color} ${isSelected ? 'selected ring-2 ring-offset-1 ring-indigo-500/50' : 'opacity-80 hover:opacity-100 hover:shadow-sm'}">
-                        <div class="flex items-center gap-2">
-                            <div class="w-2 h-8 rounded-full bg-black/10"></div>
-                            <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-1.5">
+                            <div class="w-1.5 h-8 rounded-full bg-black/10 flex-shrink-0"></div>
+                            
+                            <div class="flex-1 min-w-0 flex flex-col justify-center h-full">
                                 <input type="text" value="${t.name}" onchange="updateTaskName('${t.id}', this.value)" 
-                                    class="w-full bg-transparent font-bold text-xs focus:outline-none focus:bg-white/50 rounded px-0.5 text-inherit"
-                                    onclick="event.stopPropagation(); pushHistory()"> <!-- push history on focus maybe better but simple here -->
+                                    class="w-full bg-transparent font-bold text-xs focus:outline-none focus:bg-white/50 rounded px-0.5 text-inherit truncate leading-tight"
+                                    onclick="event.stopPropagation(); pushHistory()">
                             </div>
-                            <button onclick="event.stopPropagation(); openColorPicker('${t.id}')" class="p-1.5 rounded-full hover:bg-black/10 active:scale-90 transition-transform"><i data-lucide="droplet" class="w-3 h-3 opacity-60"></i></button>
+                            
+                            <!-- Actions -->
+                            <div class="flex flex-col gap-0.5 flex-shrink-0">
+                                <button onclick="event.stopPropagation(); openTaskEditModal('${t.id}')" class="p-1 rounded-full hover:bg-black/10 active:scale-90 transition-transform text-inherit" title="タスク詳細">
+                                    <i data-lucide="file-text" class="w-3 h-3 ${hasMemo ? 'fill-current opacity-100' : 'opacity-40'}"></i>
+                                </button>
+                                <button onclick="event.stopPropagation(); openColorPicker('${t.id}')" class="p-1 rounded-full hover:bg-black/10 active:scale-90 transition-transform text-inherit" title="色変更">
+                                    <i data-lucide="droplet" class="w-3 h-3 opacity-40"></i>
+                                </button>
+                            </div>
                         </div>
                         ${isSelected ? '<div class="absolute -top-1 -right-1 bg-indigo-500 text-white rounded-full p-0.5 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>' : ''}
                     </div>
@@ -846,7 +891,7 @@
                 color = CONFIG.colors[Math.floor(Math.random() * CONFIG.colors.length)];
             }
 
-            state.tasks.push({ id: newId, name: '新規', color });
+            state.tasks.push({ id: newId, name: '新規', color, memo: '' });
             state.activeTaskId = newId;
             saveData();
             renderPalette();
@@ -906,7 +951,63 @@
             closeColorModal();
         }
 
-        // --- Detail Modal Logic (Task) ---
+        // --- Task Edit Modal Logic (New!) ---
+        function openTaskEditModal(taskId) {
+            state.editingTaskId = taskId;
+            const task = state.tasks.find(t => t.id === taskId);
+            if(!task) return;
+
+            document.getElementById('task-edit-name').value = task.name;
+            document.getElementById('task-edit-memo').value = task.memo || '';
+            
+            const modal = document.getElementById('task-edit-modal');
+            const content = document.getElementById('task-modal-content');
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                modal.classList.remove('opacity-0');
+                content.classList.remove('scale-95');
+                content.classList.add('scale-100');
+            });
+            
+            // Focus on memo if name is already set
+            if(task.name && task.name !== '新規') {
+                document.getElementById('task-edit-memo').focus();
+            } else {
+                document.getElementById('task-edit-name').focus();
+            }
+        }
+
+        function closeTaskEditModal() {
+            const modal = document.getElementById('task-edit-modal');
+            const content = document.getElementById('task-modal-content');
+            modal.classList.add('opacity-0');
+            content.classList.remove('scale-100');
+            content.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                state.editingTaskId = null;
+            }, 200);
+        }
+
+        function saveTaskEdit() {
+            if(!state.editingTaskId) return;
+            pushHistory(); // 変更前に履歴
+
+            const name = document.getElementById('task-edit-name').value;
+            const memo = document.getElementById('task-edit-memo').value;
+            
+            const task = state.tasks.find(t => t.id === state.editingTaskId);
+            if(task) {
+                task.name = name;
+                task.memo = memo;
+                saveData();
+                renderAll(); // Palette (indicator) & Schedule (if name changed) update
+            }
+            closeTaskEditModal();
+        }
+
+
+        // --- Detail Modal Logic (Schedule Cell) ---
         function openDetailModal(date, time, taskId) {
             state.editingCell = { date, time };
             const task = state.tasks.find(t => t.id === taskId);
@@ -1023,8 +1124,6 @@
                 state.viewDate = selectedDate;
                 
                 renderAll();
-                
-                // 次回のためにリセット（同じ日付を選び直した時にも発火するようにしても良いが、値は残しておくと便利なのでそのまま）
             });
         }
 
@@ -1066,12 +1165,16 @@
                 try {
                     const jsonString = e.target.result;
                     const parsed = JSON.parse(jsonString);
-                    // Handle both wrapped format (current) and raw format (potential legacy/manual)
                     const newData = parsed.data || parsed;
 
                     if (newData.tasks && newData.schedule) {
                         pushHistory(); // バックアップから復元する前に現在の状態をUndoスタックへ
-                        state.tasks = newData.tasks;
+                        
+                        // Migration on import as well
+                        state.tasks = newData.tasks.map(t => ({
+                            ...t,
+                            memo: t.memo || ''
+                        }));
                         state.schedule = newData.schedule;
                         state.weeklyMemos = newData.weeklyMemos || {};
                         if(newData.zoomLevel) state.zoomLevel = newData.zoomLevel;
@@ -1095,5 +1198,4 @@
     </script>
 </body>
 </html>
-
 
