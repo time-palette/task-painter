@@ -347,7 +347,7 @@
     <script>
         // --- Config & Data ---
         const CONFIG = {
-            storageKey: 'task_painter_v5', // Reverted to v5 to restore data!
+            storageKey: 'task_painter_v5',
             colors: [
                 'bg-red-100 text-red-800', 'bg-orange-100 text-orange-800', 'bg-amber-100 text-amber-800',
                 'bg-yellow-100 text-yellow-800', 'bg-lime-100 text-lime-800', 'bg-green-100 text-green-800',
@@ -474,7 +474,7 @@
                 state.weeklyMemos = data.weeklyMemos || {};
                 if(data.zoomLevel) state.zoomLevel = data.zoomLevel;
                 
-                showToast("保存データを読み込みました");
+                // ここにあった showToast を削除しました！
             } else {
                 state.tasks = JSON.parse(JSON.stringify(INITIAL_TASKS)).map(t => ({...t, memo: ''}));
                 state.schedule = {};
