@@ -179,7 +179,7 @@
                 </div>
                 <button id="next-btn" class="p-1.5 bg-white border rounded-full hover:bg-slate-100 active:scale-90 transition text-slate-600"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
                 
-                <!-- Date Picker Trigger (New Feature) -->
+                <!-- Date Picker Trigger -->
                 <div class="date-picker-wrapper ml-1" title="日付を指定してジャンプ">
                     <button class="p-1.5 bg-indigo-50 border border-indigo-100 rounded-full hover:bg-indigo-100 active:scale-90 transition text-indigo-600">
                         <i data-lucide="calendar" class="w-4 h-4"></i>
@@ -413,6 +413,23 @@
             renderAll();
             setupEvents();
             updateUndoButton();
+            
+            // 初回ロード時に朝9時にスクロール
+            setTimeout(scrollToMorning, 100);
+        }
+
+        function scrollToMorning() {
+            const container = document.getElementById('schedule-scroll');
+            const target = document.getElementById('start-time-row');
+            
+            if (container && target) {
+                // ヘッダーの高さを考慮（スティッキーヘッダーの下に9:00が来るように調整）
+                const header = document.querySelector('thead');
+                const headerHeight = header ? header.offsetHeight : 50;
+                
+                // ターゲット位置からヘッダー分を引いてスクロール
+                container.scrollTop = target.offsetTop - headerHeight;
+            }
         }
 
         function loadData() {
@@ -539,7 +556,10 @@
             }
 
             times.forEach(t => {
-                html += `<tr class="schedule-row">
+                // 9:00の行にIDを付与して後でスクロールできるようにする
+                const rowId = (t === '9:00') ? 'id="start-time-row"' : '';
+                
+                html += `<tr class="schedule-row" ${rowId}>
                     <td class="sticky-col bg-slate-50 p-0 text-[10px] text-slate-400 font-mono text-center border-b border-r border-slate-200 z-40 select-none align-middle shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                         <div class="flex items-center justify-center h-full w-full">
                             ${t}
