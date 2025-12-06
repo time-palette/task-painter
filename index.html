@@ -6,6 +6,7 @@
     <title>タスクPainter Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
     <style>
         body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
         ::-webkit-scrollbar { width: 4px; height: 4px; }
@@ -72,6 +73,34 @@
             100% { transform: rotate(0deg); }
         }
         .shake-anim { animation: shake 0.2s infinite; }
+
+        /* SortableJS ドラッグ中のスタイル */
+        .sortable-ghost { opacity: 0.4; background-color: #f1f5f9; }
+        .sortable-drag { cursor: grabbing; }
+        .drag-handle { cursor: grab; touch-action: none; }
+        .drag-handle:active { cursor: grabbing; }
+
+        /* スケジュールD&D用スタイル */
+        .task-draggable {
+            touch-action: none; /* これが重要：タスク上でのスクロールを防止 */
+            cursor: grab;
+        }
+        .task-draggable:active {
+            cursor: grabbing;
+        }
+        .dragging-mirror {
+            position: fixed;
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0.8;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+            transform: scale(1.05) rotate(-2deg);
+            transition: none; /* ドラッグ追従に遅延を出さない */
+        }
+        .drag-target-highlight {
+            background-color: #e0e7ff !important; /* Indigo-100 */
+            box-shadow: inset 0 0 0 2px #6366f1; /* Indigo-500 */
+        }
 
         /* トースト通知 */
         #toast {
@@ -400,6 +429,15 @@
             zoomLevel: 40 
         };
 
+        // --- Drag & Drop (Schedule Grid) Variables ---
+        let dragSrcInfo = null;
+        let dragGhost = null;
+        let isScheduleDragging = false;
+        let lastHighlightedCell = null;
+
+        // --- Sortable Instance ---
+        let sortableInstance = null;
+
         // --- History / Undo System ---
         let historyStack = [];
 
@@ -448,6 +486,10 @@
             
             // 初回ロード時に朝9時にスクロール
             setTimeout(scrollToMorning, 100);
+
+            // Add global listeners for drag & drop
+            window.addEventListener('pointermove', handleWindowPointerMove, { passive: false });
+            window.addEventListener('pointerup', handleWindowPointerUp);
         }
 
         function scrollToMorning() {
@@ -465,10 +507,9 @@
             const json = localStorage.getItem(CONFIG.storageKey);
             if(json) {
                 const data = JSON.parse(json);
-                // Migration: 古いデータにはmemoが無いので、読み込み時に付与する
                 state.tasks = (data.tasks || INITIAL_TASKS).map(t => ({
                     ...t,
-                    memo: t.memo || '' // 既存データにmemoがなければ空文字を入れる
+                    memo: t.memo || ''
                 }));
                 state.schedule = data.schedule || {};
                 state.weeklyMemos = data.weeklyMemos || {};
@@ -607,10 +648,14 @@
                     let content = '';
                     let classes = 'bg-white hover:bg-slate-50';
                     let borderClass = 'border-slate-100';
+                    let dragAttr = '';
                     
                     if (task) {
-                        classes = `${task.color} cursor-pointer hover:brightness-95 transition-all`;
+                        classes = `${task.color} cursor-pointer hover:brightness-95 transition-all task-draggable`;
                         borderClass = 'border-white/20';
+                        // Add pointerdown listener directly here for drag start
+                        dragAttr = `onpointerdown="handleTaskPointerDown(event, '${d}', '${t}', '${taskId}')"`;
+
                         content = `
                             <div class="flex flex-col items-start justify-start h-full w-full pointer-events-none overflow-hidden px-1 py-0.5 pop-in">
                                 <span class="flex-shrink-0 font-bold zoom-content-title w-full text-left break-words leading-tight drop-shadow-sm mb-0.5" 
@@ -627,9 +672,11 @@
                         `;
                     }
 
-                    html += `<td class="max-w-0 border-b border-r ${borderClass} p-0 relative transition-all active:scale-95 duration-75" 
+                    // data attributes are crucial for drag target detection
+                    html += `<td class="max-w-0 border-b border-r ${borderClass} p-0 relative transition-all duration-75 schedule-cell" 
+                        data-date="${d}" data-time="${t}"
                         onclick="handleCellClick('${d}', '${t}', '${taskId}')">
-                        <div class="absolute inset-0 p-0.5 flex items-start justify-center ${classes}">
+                        <div class="absolute inset-0 p-0.5 flex items-start justify-center ${classes}" ${dragAttr}>
                             ${content}
                         </div>
                     </td>`;
@@ -667,6 +714,138 @@
 
             document.getElementById('body-rows').innerHTML = html;
         }
+
+        // --- Custom Drag & Drop Logic for Schedule ---
+        function handleTaskPointerDown(e, date, time, taskId) {
+            // If delete mode is active, don't drag
+            if (state.deleteMode) return;
+
+            // Prepare for dragging
+            dragSrcInfo = { date, time, taskId, startX: e.clientX, startY: e.clientY };
+            
+            // Note: We don't start dragging immediately to allow for clicking.
+            // Dragging starts in pointermove if distance > threshold.
+            
+            e.currentTarget.setPointerCapture(e.pointerId);
+            // Prevent default touch actions (scrolling) is handled by CSS touch-action: none on the element
+        }
+
+        function handleWindowPointerMove(e) {
+            if (!dragSrcInfo) return;
+
+            if (!isScheduleDragging) {
+                // Check threshold
+                const dist = Math.hypot(e.clientX - dragSrcInfo.startX, e.clientY - dragSrcInfo.startY);
+                if (dist > 5) {
+                    startScheduleDrag(e);
+                }
+            }
+
+            if (isScheduleDragging) {
+                e.preventDefault(); // Stop scrolling/selection
+                
+                // Move Ghost
+                if (dragGhost) {
+                    dragGhost.style.left = `${e.clientX - 20}px`;
+                    dragGhost.style.top = `${e.clientY - 20}px`;
+                }
+
+                // Detect Target
+                const el = document.elementFromPoint(e.clientX, e.clientY);
+                const cell = el ? el.closest('td.schedule-cell') : null;
+
+                // Highlight Logic
+                if (lastHighlightedCell && lastHighlightedCell !== cell) {
+                    lastHighlightedCell.classList.remove('drag-target-highlight');
+                }
+                if (cell) {
+                    cell.classList.add('drag-target-highlight');
+                    lastHighlightedCell = cell;
+                } else {
+                    lastHighlightedCell = null;
+                }
+            }
+        }
+
+        function startScheduleDrag(e) {
+            isScheduleDragging = true;
+            
+            // Create Ghost
+            const srcTask = state.tasks.find(t => t.id === dragSrcInfo.taskId);
+            if (!srcTask) return;
+
+            dragGhost = document.createElement('div');
+            dragGhost.className = `dragging-mirror ${srcTask.color} rounded p-2 text-xs font-bold w-24 h-10 flex items-center justify-center border border-white/50`;
+            dragGhost.innerText = srcTask.name;
+            dragGhost.style.left = `${e.clientX}px`;
+            dragGhost.style.top = `${e.clientY}px`;
+            document.body.appendChild(dragGhost);
+        }
+
+        function handleWindowPointerUp(e) {
+            if (!dragSrcInfo) return;
+
+            if (isScheduleDragging) {
+                // Handle Drop
+                const el = document.elementFromPoint(e.clientX, e.clientY);
+                const targetCell = el ? el.closest('td.schedule-cell') : null;
+
+                if (targetCell) {
+                    const targetDate = targetCell.dataset.date;
+                    const targetTime = targetCell.dataset.time;
+
+                    // Execute Move (Swap if needed)
+                    if (targetDate && targetTime) {
+                        executeMoveTask(dragSrcInfo.date, dragSrcInfo.time, targetDate, targetTime);
+                    }
+                }
+            } else {
+                // It was a click (no drag occurred) -> Handled by onclick in HTML
+                // We just need to ensure we don't block the click.
+                // The native onclick will fire after pointerup.
+            }
+
+            // Cleanup
+            if (dragGhost) {
+                dragGhost.remove();
+                dragGhost = null;
+            }
+            if (lastHighlightedCell) {
+                lastHighlightedCell.classList.remove('drag-target-highlight');
+                lastHighlightedCell = null;
+            }
+            dragSrcInfo = null;
+            isScheduleDragging = false;
+        }
+
+        function executeMoveTask(srcDate, srcTime, destDate, destTime) {
+            if (srcDate === destDate && srcTime === destTime) return;
+
+            pushHistory();
+
+            const srcData = state.schedule[srcDate]?.[srcTime];
+            const destData = state.schedule[destDate]?.[destTime];
+
+            // 1. Remove from Source
+            if (!state.schedule[srcDate]) state.schedule[srcDate] = {};
+            delete state.schedule[srcDate][srcTime];
+
+            // 2. Handle Destination
+            if (!state.schedule[destDate]) state.schedule[destDate] = {};
+            
+            if (destData) {
+                // SWAP: Move destination task to source
+                state.schedule[srcDate][srcTime] = destData;
+            }
+
+            // 3. Place Source Task at Destination
+            state.schedule[destDate][destTime] = srcData;
+
+            saveData();
+            renderBody(); // Re-render to show changes
+            showToast("移動しました");
+        }
+
 
         // --- Copy Function ---
         function copyDaySchedule(dateStr) {
@@ -738,21 +917,26 @@
                 deleteBtn.className = "bg-red-500 text-white px-3 py-1 rounded-full transition-colors flex items-center gap-1 text-xs shadow-md border border-red-600 animate-pulse";
                 addBtn.disabled = true;
                 addBtn.classList.add('opacity-30');
+                
+                // 削除モード時はドラッグ無効化
+                if (sortableInstance) sortableInstance.option("disabled", true);
             } else {
                 deleteBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> 整理`;
                 deleteBtn.className = "text-slate-400 hover:text-red-500 hover:bg-red-50 px-2 py-1 rounded-full transition-colors flex items-center gap-1 text-xs border border-transparent";
                 addBtn.disabled = false;
                 addBtn.classList.remove('opacity-30');
+
+                // 通常モード時はドラッグ有効化
+                if (sortableInstance) sortableInstance.option("disabled", false);
             }
 
             let html = '';
 
-            // Cursor Item
+            // Cursor Item (Non-draggable)
             if (!state.deleteMode) {
                 const isCursorSelected = state.activeTaskId === CONFIG.cursorId;
                 html += `
-                    <div onclick="setActiveTask('${CONFIG.cursorId}')" 
-                        class="palette-item relative rounded-lg p-2 cursor-pointer transition-all border border-slate-200 bg-white flex flex-col items-center justify-center gap-1 ${isCursorSelected ? 'selected ring-2 ring-offset-1 ring-slate-400 bg-slate-50' : 'opacity-80 hover:opacity-100 hover:bg-slate-50'}">
+                    <div onclick="setActiveTask('${CONFIG.cursorId}')" class="palette-item-static relative rounded-lg p-2 cursor-pointer transition-all border border-slate-200 bg-white flex flex-col items-center justify-center gap-1 ${isCursorSelected ? 'selected ring-2 ring-offset-1 ring-slate-400 bg-slate-50' : 'opacity-80 hover:opacity-100 hover:bg-slate-50'}">
                         <i data-lucide="mouse-pointer-2" class="w-6 h-6 ${isCursorSelected ? 'text-indigo-600' : 'text-slate-400'}"></i>
                         <span class="text-[10px] font-bold ${isCursorSelected ? 'text-indigo-600' : 'text-slate-400'}">編集のみ</span>
                         ${isCursorSelected ? '<div class="absolute -top-1 -right-1 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>' : ''}
@@ -760,14 +944,14 @@
                 `;
             }
 
-            // Task Items
+            // Task Items (Draggable)
             html += state.tasks.map(t => {
                 const isSelected = t.id === state.activeTaskId;
                 const hasMemo = t.memo && t.memo.trim().length > 0;
                 
                 if (state.deleteMode) {
                     return `
-                        <div onclick="window.confirmDeleteTask('${t.id}')" 
+                        <div data-id="${t.id}" onclick="window.confirmDeleteTask('${t.id}')" 
                             class="palette-item relative rounded-lg p-2 cursor-pointer transition-all border-2 border-red-400 bg-red-50 shake-anim hover:bg-red-100">
                             <div class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center shadow-sm z-10"><i data-lucide="x" class="w-3 h-3"></i></div>
                             <div class="flex items-center gap-2 opacity-70">
@@ -780,29 +964,32 @@
                     `;
                 }
 
-                // Normal Mode with Edit/Info Button
+                // Normal Mode with Edit/Info Button & Drag Handle
                 return `
-                    <div onclick="setActiveTask('${t.id}')" 
-                        class="palette-item relative rounded-lg p-2 cursor-pointer transition-all border border-transparent ${t.color} ${isSelected ? 'selected ring-2 ring-offset-1 ring-indigo-500/50' : 'opacity-80 hover:opacity-100 hover:shadow-sm'}">
-                        <div class="flex items-center gap-1.5">
-                            <div class="w-1.5 h-8 rounded-full bg-black/10 flex-shrink-0"></div>
-                            
-                            <div class="flex-1 min-w-0 flex flex-col justify-center h-full">
-                                <input type="text" value="${t.name}" onchange="updateTaskName('${t.id}', this.value)" 
-                                    class="w-full bg-transparent font-bold text-xs focus:outline-none focus:bg-white/50 rounded px-0.5 text-inherit truncate leading-tight"
-                                    onclick="event.stopPropagation(); pushHistory()">
-                            </div>
-                            
-                            <!-- Actions -->
-                            <div class="flex flex-col gap-0.5 flex-shrink-0">
-                                <button onclick="event.stopPropagation(); openTaskEditModal('${t.id}')" class="p-1 rounded-full hover:bg-black/10 active:scale-90 transition-transform text-inherit" title="タスク詳細">
-                                    <i data-lucide="file-text" class="w-3 h-3 ${hasMemo ? 'fill-current opacity-100' : 'opacity-40'}"></i>
-                                </button>
-                                <button onclick="event.stopPropagation(); openColorPicker('${t.id}')" class="p-1 rounded-full hover:bg-black/10 active:scale-90 transition-transform text-inherit" title="色変更">
-                                    <i data-lucide="droplet" class="w-3 h-3 opacity-40"></i>
-                                </button>
-                            </div>
+                    <div data-id="${t.id}" onclick="setActiveTask('${t.id}')" 
+                        class="palette-item relative rounded-lg p-2 cursor-pointer transition-all border border-transparent ${t.color} ${isSelected ? 'selected ring-2 ring-offset-1 ring-indigo-500/50' : 'opacity-80 hover:opacity-100 hover:shadow-sm'} flex items-center gap-1.5">
+                        
+                        <!-- Drag Handle -->
+                        <div class="drag-handle text-black/20 hover:text-black/40 cursor-grab p-0.5 -ml-1 flex-shrink-0" title="ドラッグして並べ替え">
+                            <i data-lucide="grip-vertical" class="w-4 h-4"></i>
                         </div>
+
+                        <div class="flex-1 min-w-0 flex flex-col justify-center h-full">
+                            <input type="text" value="${t.name}" onchange="updateTaskName('${t.id}', this.value)" 
+                                class="w-full bg-transparent font-bold text-xs focus:outline-none focus:bg-white/50 rounded px-0.5 text-inherit truncate leading-tight"
+                                onclick="event.stopPropagation(); pushHistory()">
+                        </div>
+                        
+                        <!-- Actions -->
+                        <div class="flex flex-col gap-0.5 flex-shrink-0">
+                            <button onclick="event.stopPropagation(); openTaskEditModal('${t.id}')" class="p-1 rounded-full hover:bg-black/10 active:scale-90 transition-transform text-inherit" title="タスク詳細">
+                                <i data-lucide="file-text" class="w-3 h-3 ${hasMemo ? 'fill-current opacity-100' : 'opacity-40'}"></i>
+                            </button>
+                            <button onclick="event.stopPropagation(); openColorPicker('${t.id}')" class="p-1 rounded-full hover:bg-black/10 active:scale-90 transition-transform text-inherit" title="色変更">
+                                <i data-lucide="droplet" class="w-3 h-3 opacity-40"></i>
+                            </button>
+                        </div>
+                        
                         ${isSelected ? '<div class="absolute -top-1 -right-1 bg-indigo-500 text-white rounded-full p-0.5 shadow-sm"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>' : ''}
                     </div>
                 `;
@@ -810,6 +997,40 @@
             
             container.innerHTML = html;
             lucide.createIcons();
+
+            // Re-init Sortable if needed or init for the first time
+            initSortable();
+        }
+
+        function initSortable() {
+            const el = document.getElementById('palette-container');
+            if (sortableInstance) {
+                sortableInstance.destroy();
+            }
+
+            sortableInstance = Sortable.create(el, {
+                animation: 150,
+                handle: '.drag-handle', // ハンドルのみでドラッグ可能
+                draggable: '.palette-item', // ドラッグ可能な要素のクラス
+                ghostClass: 'sortable-ghost',
+                dragClass: 'sortable-drag',
+                onEnd: function (evt) {
+                    pushHistory(); // 履歴保存
+                    
+                    // DOMの順序に基づいてstate.tasksを並べ替え
+                    const newOrderIds = Array.from(el.querySelectorAll('.palette-item')).map(item => item.getAttribute('data-id'));
+                    
+                    const newTasks = [];
+                    newOrderIds.forEach(id => {
+                        const task = state.tasks.find(t => t.id === id);
+                        if(task) newTasks.push(task);
+                    });
+
+                    state.tasks = newTasks;
+                    saveData();
+                    // No renderAll() needed here as DOM is already sorted
+                }
+            });
         }
 
         // --- Logic ---
@@ -838,6 +1059,9 @@
         };
 
         function handleCellClick(date, time, currentTaskId) {
+            // Drag中はClickイベントを無視（安全策）
+            if (isScheduleDragging) return;
+
             if (state.deleteMode) return;
 
             if (state.activeTaskId === CONFIG.cursorId) {
