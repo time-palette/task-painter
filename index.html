@@ -77,25 +77,45 @@
         /* SortableJS ドラッグ中のスタイル */
         .sortable-ghost { opacity: 0.4; background-color: #f1f5f9; }
         .sortable-drag { cursor: grabbing; }
-        .drag-handle { cursor: grab; touch-action: none; }
+        
+        /* 共通ハンドルスタイル */
+        .drag-handle { 
+            cursor: grab; 
+            touch-action: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
         .drag-handle:active { cursor: grabbing; }
 
-        /* スケジュールD&D用スタイル */
-        .task-draggable {
-            touch-action: none; /* これが重要：タスク上でのスクロールを防止 */
+        /* スケジュールD&D用スタイル（スマート版） */
+        .schedule-drag-handle {
+            width: 8px; /* 極細に */
+            height: 100%;
+            background-color: rgba(0,0,0,0.08); /* うっすら見える程度 */
+            flex-shrink: 0;
             cursor: grab;
+            touch-action: none;
+            transition: background-color 0.2s, width 0.2s;
+            border-top-left-radius: 2px;
+            border-bottom-left-radius: 2px;
         }
-        .task-draggable:active {
-            cursor: grabbing;
+        /* 親要素（タスク）ホバー時や、ハンドルアクティブ時に強調 */
+        .schedule-task-container:hover .schedule-drag-handle,
+        .schedule-drag-handle:active {
+            background-color: rgba(0,0,0,0.25);
         }
+
         .dragging-mirror {
             position: fixed;
             pointer-events: none;
             z-index: 9999;
-            opacity: 0.8;
+            opacity: 0.9;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
             transform: scale(1.05) rotate(-2deg);
-            transition: none; /* ドラッグ追従に遅延を出さない */
+            transition: none; 
+            overflow: hidden;
+            white-space: nowrap;
         }
         .drag-target-highlight {
             background-color: #e0e7ff !important; /* Indigo-100 */
@@ -490,6 +510,7 @@
             // Add global listeners for drag & drop
             window.addEventListener('pointermove', handleWindowPointerMove, { passive: false });
             window.addEventListener('pointerup', handleWindowPointerUp);
+            window.addEventListener('pointercancel', handleWindowPointerUp); // Safety fallback
         }
 
         function scrollToMorning() {
@@ -651,32 +672,36 @@
                     let dragAttr = '';
                     
                     if (task) {
-                        classes = `${task.color} cursor-pointer hover:brightness-95 transition-all task-draggable`;
+                        classes = `${task.color} cursor-pointer hover:brightness-95 transition-all`;
                         borderClass = 'border-white/20';
-                        // Add pointerdown listener directly here for drag start
-                        dragAttr = `onpointerdown="handleTaskPointerDown(event, '${d}', '${t}', '${taskId}')"`;
 
+                        // Flex Layout for Handle + Content
                         content = `
-                            <div class="flex flex-col items-start justify-start h-full w-full pointer-events-none overflow-hidden px-1 py-0.5 pop-in">
-                                <span class="flex-shrink-0 font-bold zoom-content-title w-full text-left break-words leading-tight drop-shadow-sm mb-0.5" 
-                                      style="white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
-                                      ${task.name}
-                                </span>
-                                ${detail ? `
-                                    <div class="flex-1 w-full min-h-0 overflow-hidden">
-                                        <div class="zoom-content-detail w-full text-left bg-white/60 rounded-sm px-1 py-0.5 font-medium shadow-sm leading-tight text-slate-800 break-words" 
-                                             style="white-space: pre-wrap; word-break: break-all;">${detail}</div>
-                                    </div>
-                                ` : ''}
+                            <div class="flex h-full w-full overflow-hidden schedule-task-container">
+                                <!-- Drag Handle (Left Side) - Slim & No Icon -->
+                                <div class="schedule-drag-handle" onpointerdown="handleTaskPointerDown(event, '${d}', '${t}', '${taskId}')" title="ドラッグで移動"></div>
+                                
+                                <!-- Content (Scrollable/Clickable) -->
+                                <div class="flex-1 flex flex-col items-start justify-start h-full min-w-0 px-1 py-0.5 pop-in pointer-events-none">
+                                    <span class="flex-shrink-0 font-bold zoom-content-title w-full text-left break-words leading-tight drop-shadow-sm mb-0.5" 
+                                          style="white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                                          ${task.name}
+                                    </span>
+                                    ${detail ? `
+                                        <div class="flex-1 w-full min-h-0 overflow-hidden">
+                                            <div class="zoom-content-detail w-full text-left bg-white/60 rounded-sm px-1 py-0.5 font-medium shadow-sm leading-tight text-slate-800 break-words" 
+                                                 style="white-space: pre-wrap; word-break: break-all;">${detail}</div>
+                                        </div>
+                                    ` : ''}
+                                </div>
                             </div>
                         `;
                     }
 
-                    // data attributes are crucial for drag target detection
                     html += `<td class="max-w-0 border-b border-r ${borderClass} p-0 relative transition-all duration-75 schedule-cell" 
                         data-date="${d}" data-time="${t}"
                         onclick="handleCellClick('${d}', '${t}', '${taskId}')">
-                        <div class="absolute inset-0 p-0.5 flex items-start justify-center ${classes}" ${dragAttr}>
+                        <div class="absolute inset-0 p-0.5 flex items-start justify-center ${classes}">
                             ${content}
                         </div>
                     </td>`;
@@ -717,37 +742,40 @@
 
         // --- Custom Drag & Drop Logic for Schedule ---
         function handleTaskPointerDown(e, date, time, taskId) {
+            // Stop propagation to prevent cell click (which opens modal)
+            e.stopPropagation();
+
             // If delete mode is active, don't drag
             if (state.deleteMode) return;
 
             // Prepare for dragging
             dragSrcInfo = { date, time, taskId, startX: e.clientX, startY: e.clientY };
             
-            // Note: We don't start dragging immediately to allow for clicking.
-            // Dragging starts in pointermove if distance > threshold.
-            
+            // Capture pointer on the Handle element
             e.currentTarget.setPointerCapture(e.pointerId);
-            // Prevent default touch actions (scrolling) is handled by CSS touch-action: none on the element
+            
+            // Prevent default browser behavior (scrolling) specifically for this interaction
+            // Since we are on a handle with touch-action: none, this should be fine.
         }
 
         function handleWindowPointerMove(e) {
             if (!dragSrcInfo) return;
 
             if (!isScheduleDragging) {
-                // Check threshold
+                // Check threshold to prevent accidental small slips
                 const dist = Math.hypot(e.clientX - dragSrcInfo.startX, e.clientY - dragSrcInfo.startY);
-                if (dist > 5) {
+                if (dist > 3) {
                     startScheduleDrag(e);
                 }
             }
 
             if (isScheduleDragging) {
-                e.preventDefault(); // Stop scrolling/selection
+                e.preventDefault(); // Stop scrolling/selection logic
                 
                 // Move Ghost
                 if (dragGhost) {
-                    dragGhost.style.left = `${e.clientX - 20}px`;
-                    dragGhost.style.top = `${e.clientY - 20}px`;
+                    dragGhost.style.left = `${e.clientX + 10}px`;
+                    dragGhost.style.top = `${e.clientY - 15}px`;
                 }
 
                 // Detect Target
@@ -775,11 +803,16 @@
             if (!srcTask) return;
 
             dragGhost = document.createElement('div');
-            dragGhost.className = `dragging-mirror ${srcTask.color} rounded p-2 text-xs font-bold w-24 h-10 flex items-center justify-center border border-white/50`;
+            // Remove w-24 to let it size automatically, add padding/shadow
+            dragGhost.className = `dragging-mirror ${srcTask.color} rounded p-2 text-xs font-bold border border-white/50`;
+            dragGhost.style.minWidth = '100px';
             dragGhost.innerText = srcTask.name;
             dragGhost.style.left = `${e.clientX}px`;
             dragGhost.style.top = `${e.clientY}px`;
             document.body.appendChild(dragGhost);
+            
+            // Feedback
+            if(navigator.vibrate) navigator.vibrate(10);
         }
 
         function handleWindowPointerUp(e) {
@@ -800,9 +833,9 @@
                     }
                 }
             } else {
-                // It was a click (no drag occurred) -> Handled by onclick in HTML
-                // We just need to ensure we don't block the click.
-                // The native onclick will fire after pointerup.
+                // It was just a tap on the handle? 
+                // Do nothing or maybe show info?
+                // Currently doing nothing is safer.
             }
 
             // Cleanup
