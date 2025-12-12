@@ -254,13 +254,13 @@
                 <tbody id="body-rows"></tbody>
             </table>
 
-            <!-- Weekly Memo Section -->
+            <!-- Weekly Memo Section (Now just Memo) -->
             <div class="p-4 md:p-6 mb-24 max-w-4xl mx-auto">
                 <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                     <div class="bg-slate-50 border-b px-4 py-2 flex items-center justify-between">
                         <h3 class="font-bold text-slate-600 flex items-center gap-2 text-sm">
                             <i data-lucide="lightbulb" class="w-4 h-4 text-amber-500"></i>
-                            <span class="tracking-wide">Weekly Memo</span>
+                            <span class="tracking-wide">Memo</span>
                         </h3>
                     </div>
                     <div class="p-0">
@@ -571,10 +571,11 @@
             root.style.setProperty('--font-scale', scale);
         }
 
-        // --- Weekly Memo Logic ---
+        // --- Memo Logic (Fixed to be global/shared across weeks) ---
         function getWeeklyMemoKey() {
-            const dates = getDates();
-            return formatDate(dates[0]);
+            // 以前は日付に基づいていましたが、固定のキーを返すことで
+            // 週が変わっても同じ内容が表示されるように変更しました。
+            return 'shared_memo_key';
         }
 
         function initWeeklyMemo() {
